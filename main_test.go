@@ -21,20 +21,53 @@ func TestParseSubscriptionTable(t *testing.T) {
 }
 
 func TestParseGMPTable(t *testing.T) {
-	page := []byte(`<table><tbody><tr><td>Test IPO Open</td><td>₹15</td><td>🟢</td><td>₹94</td><td>₹109 (15.96%)</td><td>2-4 Nov</td></tr></tbody></table>`)
-	premiums, err := parseGMPTable(page)
+	page := []byte(`<h3>Current Mainboard IPO</h3><table><tbody><tr><td>Closed IPO Closed</td><td>₹9</td><td>🟢</td><td>₹82</td><td>₹91 (10.98%)</td><td>29-2 Nov</td></tr></tbody></table><h3>Current SME IPO</h3><table><tbody><tr><td>SME IPO Open</td><td>₹99</td><td>🟢</td><td>₹100</td><td>₹199 (99.00%)</td><td>2-4 Nov</td></tr></tbody></table>`)
+	ipos, err := parseGMPTable(page)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := premiums[normalizeName("Test IPO")]; got != "₹15" {
-		t.Fatalf("GMP = %q, want ₹15", got)
+	if len(ipos) != 1 || ipos[0].Name != "Closed IPO" || ipos[0].GreyMarketPremium != "₹9" || ipos[0].GreyMarketPremiumPercent != "10.98%" {
+		t.Fatalf("unexpected Mainboard IPO data: %#v", ipos)
 	}
 }
 
-func TestBuildEmailForNoClosingIPOs(t *testing.T) {
+func TestParseSmallNIISubscription(t *testing.T) {
+	page := []byte(`<table><tr><td>sNII &lt; ₹10L</td><td>8,50,000</td><td>0.00%</td></tr></table><table><tr><td>sNII &lt; ₹10L</td><td>11.71x</td><td>8,50,000</td><td>99,49,576</td><td>₹161.18 Cr</td></tr></table>`)
+	got, err := parseSmallNIISubscription(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "11.71x" {
+		t.Fatalf("sNII subscription = %q, want 11.71x", got)
+	}
+}
+
+func TestIPODetailsURL(t *testing.T) {
+	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.live/mksons-fine-jewels-ipo-details/" {
+		t.Fatalf("detail URL = %q", got)
+	}
+}
+
+func TestBuildEmailForNoMainboardIPOs(t *testing.T) {
 	message := buildEmail(nil, time.Date(2026, time.November, 3, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60)))
-	if !strings.Contains(message, "No IPOs are scheduled to close today") {
+	if !strings.Contains(message, "No Mainboard IPOs are listed today") {
 		t.Fatalf("unexpected empty report: %s", message)
+	}
+}
+
+func TestBuildEmailIncludesRequestedMetrics(t *testing.T) {
+	ipo := IPO{
+		Name:                     "Test IPO",
+		RetailSubscription:       "3.08",
+		SmallNIISubscription:     "11.71x",
+		GreyMarketPremium:        "₹9",
+		GreyMarketPremiumPercent: "10.98%",
+	}
+	message := buildEmail([]IPO{ipo}, time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC))
+	for _, expected := range []string{"Retail Subscription: 3.08 x", "sNII Subscription: 11.71x", "GMP: ₹9 (10.98%)"} {
+		if !strings.Contains(message, expected) {
+			t.Errorf("email missing %q: %s", expected, message)
+		}
 	}
 }
 
@@ -54,14 +87,30 @@ func TestParseRecipients(t *testing.T) {
 
 func TestSelectClosingToday(t *testing.T) {
 	today := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60))
-	ipos := []IPO{
-		{Name: "Closing Mainboard IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "3.25"},
-		{Name: "Closing SME IPO", Category: "SME", ClosingDate: today},
-		{Name: "Tomorrow Mainboard IPO", Category: "Mainboard", ClosingDate: today.AddDate(0, 0, 1)},
+	tomorrow := today.AddDate(0, 0, 1)
+	subscriptions := []IPO{
+		{Name: "First Closed IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "1.25"},
+		{Name: "SFC Environmental", Category: "Mainboard", ClosingDate: today, RetailSubscription: "2.71"},
+		{Name: "Third Closing IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "3.50"},
+		{Name: "Fourth Closing IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "4.75"},
+		{Name: "SME IPO", Category: "SME", ClosingDate: today, RetailSubscription: "50.00"},
+		{Name: "Tomorrow IPO", Category: "Mainboard", ClosingDate: tomorrow, RetailSubscription: "9.00"},
 	}
-	selected := selectClosingToday(ipos, map[string]string{normalizeName("Closing Mainboard IPO"): "₹15"}, today)
-	if len(selected) != 1 || selected[0].Name != "Closing Mainboard IPO" || selected[0].GreyMarketPremium != "₹15" {
-		t.Fatalf("unexpected closing IPOs: %#v", selected)
+	gmpIPOs := []IPO{
+		{Name: "First Closed IPO", Category: "Mainboard", GreyMarketPremium: "₹9", GreyMarketPremiumPercent: "10.98%"},
+		{Name: "SFC Environmental Technologies", Category: "Mainboard", GreyMarketPremium: "₹15", GreyMarketPremiumPercent: "4.55%"},
+		{Name: "Third Closing IPO", Category: "Mainboard", GreyMarketPremium: "₹5", GreyMarketPremiumPercent: "5.00%"},
+		{Name: "Fourth Closing IPO", Category: "Mainboard", GreyMarketPremium: "₹7", GreyMarketPremiumPercent: "7.00%"},
+	}
+	selected := selectClosingToday(subscriptions, gmpIPOs, today)
+	if len(selected) != 4 {
+		t.Fatalf("got %d IPOs, want all 4 Mainboard IPOs closing today: %#v", len(selected), selected)
+	}
+	if selected[1].Name != "SFC Environmental Technologies" || selected[1].RetailSubscription != "2.71" || selected[1].GreyMarketPremium != "₹15" || selected[1].GreyMarketPremiumPercent != "4.55%" {
+		t.Fatalf("IPO metrics were not joined correctly: %#v", selected[1])
+	}
+	if selected[3].Name != "Fourth Closing IPO" {
+		t.Fatalf("closing IPOs were unexpectedly limited: %#v", selected)
 	}
 }
 

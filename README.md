@@ -1,6 +1,6 @@
 # IPO Closing Alerts
 
-A Go application that checks IPOWatch for Mainboard IPOs closing today, joins each IPO's current Retail subscription and GMP, then emails a report. SME IPOs are excluded. Dates are evaluated in `Asia/Kolkata` by default.
+A Go application that emails Mainboard IPOs closing today, with Retail subscription, sNII subscription, GMP, and GMP percentage. SME IPOs and IPOs closing on other dates are excluded.
 
 ## Configure email
 
@@ -56,4 +56,5 @@ Optionally add repository Actions variables `SMTP_HOST` and `SMTP_PORT`; they de
 
 ## Data notes
 
-The app reads the IPOWatch subscription-status page and GMP page, selecting Mainboard IPOs with a closing date matching today in `TIMEZONE`. It joins the data by IPO name. If no Mainboard IPOs close today, it skips sending email. `MAIL_TO` accepts multiple comma-separated email addresses. If an IPO has no GMP row, the email shows `Not listed`. IPOWatch describes GMP as unofficial and subject to change; the report is informational, not investment advice.
+Each run reads the GMP page and keeps its first three Mainboard rows in listed order, regardless of open or closed status. Retail subscription comes from IPOWatch's subscription table. sNII subscription is read from each IPO's detail page; unavailable values are reported as `Not available`. `MAIL_TO` accepts multiple comma-separated email addresses. IPOWatch describes GMP as unofficial and subject to change; the report is informational, not investment advice.
+Each run selects all Mainboard IPOs whose closing date is today in `TIMEZONE`, regardless of their Open or Closed status on the GMP page. Retail subscription comes from IPOWatch's subscription table. sNII subscription is read from each IPO's detail page; unavailable values are reported as `Not available`. `MAIL_TO` accepts multiple comma-separated email addresses. IPOWatch describes GMP as unofficial and subject to change; the report is informational, not investment advice.
