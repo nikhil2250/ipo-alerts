@@ -64,6 +64,18 @@ func validSubscriptionIPO() (ExtractedIPO, string) {
 }
 
 
+
+func TestHTMLEvidenceKeepsIPOAssociationWithinTableRows(t *testing.T) {
+	page := []byte("<table><tr><td>Crystal Crop Protection</td><td>Mainboard</td><td>14 November 2026</td></tr><tr><td>Watrana Rentals</td><td>SME</td><td>15 November 2026</td></tr></table>")
+	sourceText := htmlToText(page)
+	if !evidenceBelongsToIPO("Crystal Crop Protection", "Mainboard", sourceText) {
+		t.Fatalf("expected Mainboard evidence to be associated with Crystal row: %q", sourceText)
+	}
+	if evidenceBelongsToIPO("Crystal Crop Protection", "SME", sourceText) {
+		t.Fatalf("SME from Watrana row was incorrectly associated with Crystal: %q", sourceText)
+	}
+}
+
 func TestEvidenceBelongsToIPOAllowsCellEvidenceFromSameRow(t *testing.T) {
 	source := "Crystal Crop Protection Mainboard 14 November 2026\nWatrana Rentals SME 15 November 2026"
 	if !evidenceBelongsToIPO("Crystal Crop Protection", "Mainboard", source) {
