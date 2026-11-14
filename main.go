@@ -311,7 +311,14 @@ func extractSmallNIIWithAI(ctx context.Context, ipoName, sourceURL string, page 
 	}
 
 	const maxPageBytes = 50000
-	content := strings.TrimSpace(string(page))
+	doc, err := html.Parse(bytes.NewReader(page))
+	if err != nil {
+		return "", fmt.Errorf("parse source HTML for AI: %w", err)
+	}
+	content := strings.TrimSpace(nodeText(doc))
+	if content == "" {
+		return "", fmt.Errorf("source page contains no extractable text")
+	}
 	if len(content) > maxPageBytes {
 		content = content[:maxPageBytes]
 	}
