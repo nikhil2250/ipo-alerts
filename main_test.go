@@ -262,6 +262,29 @@ func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
 	if len(rows) != 1 || rows[0].Name != item.Name { t.Fatalf("unexpected extraction: %#v", rows) }
 }
 
+
+func TestExtractIPOsWithAIEmptyListIsSuccessfulForSubscriptionAndGMP(t *testing.T) {
+	t.Setenv("NVIDIA_API_KEY", "test-key")
+	t.Setenv("NVIDIA_MODEL", "test-model")
+
+	originalURL := nvidiaChatCompletionsURL
+	defer func() { nvidiaChatCompletionsURL = originalURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost { t.Errorf("method = %s, want POST", r.Method) }
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"ipos\":[]}"}}]}`)
+	}))
+	defer server.Close()
+	nvidiaChatCompletionsURL = server.URL
+
+	page := []byte("IPO subscription status page. There are currently no active IPO bidding rows on this page.")
+	for _, sourceType := range []string{"subscription", "gmp"} {
+		rows, err := extractIPOsWithAI(context.Background(), sourceType, "", "https://example.com/ipo", page)
+		if err != nil { t.Fatalf("%s empty result should be successful, got error: %v", sourceType, err) }
+		if len(rows) != 0 { t.Fatalf("%s returned %d rows, want zero", sourceType, len(rows)) }
+	}
+}
 func TestExtractIPOsWithAIRejectsInvalidEvidence(t *testing.T) {
 	t.Setenv("NVIDIA_API_KEY", "test-key")
 	t.Setenv("NVIDIA_MODEL", "test-model")
