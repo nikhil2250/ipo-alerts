@@ -130,8 +130,8 @@ func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_MODEL", "test-model")
 
-	originalURL := openAIChatCompletionsURL
-	defer func() { openAIChatCompletionsURL = originalURL }()
+	originalURL := nvidiaChatCompletionsURL
+	defer func() { nvidiaChatCompletionsURL = originalURL }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -160,7 +160,7 @@ func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	openAIChatCompletionsURL = server.URL
+	nvidiaChatCompletionsURL = server.URL
 
 	page := []byte(`<table><tr><td>sNII &lt; ₹10L</td><td>11.71x</td></tr></table>`)
 	got, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
@@ -176,14 +176,14 @@ func TestExtractSmallNIIWithAIRejectsEvidenceNotInPage(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_MODEL", "test-model")
 
-	originalURL := openAIChatCompletionsURL
-	defer func() { openAIChatCompletionsURL = originalURL }()
+	originalURL := nvidiaChatCompletionsURL
+	defer func() { nvidiaChatCompletionsURL = originalURL }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"{\"ipo_name\":\"Test IPO\",\"snii_subscription\":11.71,\"evidence\":\"sNII 11.71x\"}"}}]}`)
 	}))
 	defer server.Close()
-	openAIChatCompletionsURL = server.URL
+	nvidiaChatCompletionsURL = server.URL
 
 	page := []byte(`<table><tr><td>Retail</td><td>11.71x</td></tr></table>`)
 	_, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
