@@ -37,6 +37,7 @@ func TestExtractedIPOJSONUnmarshal(t *testing.T) {
 
 func validSubscriptionIPO() (ExtractedIPO, string) {
 	source := "Apex Technologies IPO Mainboard opening date 12 November 2026 closing date 14 November 2026 Retail subscription 3.42x sNII subscription 8.15x bNII subscription 11.20x QIB subscription 5.60x total subscription 6.75x"
+	row := source
 	item := ExtractedIPO{
 		Name: "Apex Technologies IPO",
 		Category: "Mainboard",
@@ -48,15 +49,15 @@ func validSubscriptionIPO() (ExtractedIPO, string) {
 		QIB: floatPtr(5.60),
 		Total: floatPtr(6.75),
 		Evidence: map[string]string{
-			"name": "Apex Technologies IPO",
-			"category": "Apex Technologies IPO Mainboard",
-			"opening_date": "Apex Technologies IPO opening date 12 November 2026",
-			"closing_date": "Apex Technologies IPO closing date 14 November 2026",
-			"retail_subscription": "Apex Technologies IPO Retail subscription 3.42x",
-			"snii_subscription": "Apex Technologies IPO sNII subscription 8.15x",
-			"bnii_subscription": "Apex Technologies IPO bNII subscription 11.20x",
-			"qib_subscription": "Apex Technologies IPO QIB subscription 5.60x",
-			"total_subscription": "Apex Technologies IPO total subscription 6.75x",
+			"name": row,
+			"category": row,
+			"opening_date": row,
+			"closing_date": row,
+			"retail_subscription": row,
+			"snii_subscription": row,
+			"bnii_subscription": row,
+			"qib_subscription": row,
+			"total_subscription": row,
 		},
 	}
 	return item, source
