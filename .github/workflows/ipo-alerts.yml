@@ -5,6 +5,12 @@ on:
     - cron: "30 5 * * *"
     - cron: "30 7 * * *"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the IPO report without sending email"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -18,9 +24,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Run tests
+        run: go test ./...
       - name: Run IPO alerts
         env:
           TIMEZONE: Asia/Kolkata
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          AI_EXTRACTION_ENABLED: ${{ vars.AI_EXTRACTION_ENABLED || 'false' }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-lightning-30b-a3b' }}
           SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
