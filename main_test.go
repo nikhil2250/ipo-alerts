@@ -76,6 +76,21 @@ func TestHTMLEvidenceKeepsIPOAssociationWithinTableRows(t *testing.T) {
 	}
 }
 
+
+func TestHTMLEvidenceKeepsNestedDivsInsideIPOTr(t *testing.T) {
+	page := []byte("<table><tr><td><div>Bombay Coated and Special Steels</div></td><td><div>Mainboard</div></td><td><div>14 November 2026</div></td></tr><tr><td><div>M.K.Sons Fine Jewels</div></td><td><div>SME</div></td><td><div>15 November 2026</div></td></tr></table>")
+	sourceText := htmlToText(page)
+	if !evidenceBelongsToIPO("Bombay Coated and Special Steels", "Mainboard", sourceText) {
+		t.Fatalf("same-row category should be associated despite nested divs: %q", sourceText)
+	}
+	if evidenceBelongsToIPO("Bombay Coated and Special Steels", "SME", sourceText) {
+		t.Fatalf("category from adjacent IPO row must not be associated: %q", sourceText)
+	}
+	if !strings.Contains(sourceText, "Bombay Coated and Special Steels Mainboard 14 November 2026") {
+		t.Fatalf("nested row text should remain on one line: %q", sourceText)
+	}
+}
+
 func TestEvidenceBelongsToIPOAllowsCellEvidenceFromSameRow(t *testing.T) {
 	source := "Crystal Crop Protection Mainboard 14 November 2026\nWatrana Rentals SME 15 November 2026"
 	if !evidenceBelongsToIPO("Crystal Crop Protection", "Mainboard", source) {
