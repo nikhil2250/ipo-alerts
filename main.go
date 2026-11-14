@@ -30,12 +30,15 @@ const (
 var openAIChatCompletionsURL = "https://api.openai.com/v1/chat/completions"
 
 var gmpPercentPattern = regexp.MustCompile(`([+-]?[0-9]+[.]?[0-9]*)%`)
+var subscriptionMultiplePattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*x\b`)
 
 type IPO struct {
 	Name                      string
 	Category                  string
 	RetailSubscription        string
 	SmallNIISubscription      string
+	SmallNIIFromAI            bool
+	SmallNIISourceURL         string
 	GreyMarketPremium         string
 	GreyMarketPremiumPercent  string
 	ClosingDate               time.Time
@@ -79,6 +82,7 @@ func run() error {
 	closingIPOs := selectClosingToday(subscriptions, gmpIPOs, today)
 	for index := range closingIPOs {
 		detailURL := ipoDetailsURL(closingIPOs[index].Name)
+		closingIPOs[index].SmallNIISourceURL = detailURL
 		detailHTML, err := fetchPage(detailURL)
 		if err != nil {
 			log.Printf("fetch sNII subscription for %s: %v", closingIPOs[index].Name, err)
@@ -97,6 +101,7 @@ func run() error {
 			cancel()
 			if aiErr == nil {
 				closingIPOs[index].SmallNIISubscription = aiValue
+				closingIPOs[index].SmallNIIFromAI = true
 				log.Printf("AI fallback extracted sNII for %s: %s", closingIPOs[index].Name, aiValue)
 			} else {
 				log.Printf("AI fallback failed for %s: %v", closingIPOs[index].Name, aiErr)
@@ -406,6 +411,14 @@ PAGE CONTENT:
 	if !strings.Contains(normalizedEvidence, "snii") && !strings.Contains(normalizedEvidence, "small nii") {
 		return "", fmt.Errorf("AI evidence does not identify sNII")
 	}
+	multipleMatch := subscriptionMultiplePattern.FindStringSubmatch(evidence)
+	if len(multipleMatch) != 2 {
+		return "", fmt.Errorf("AI evidence does not contain an explicit subscription multiple")
+	}
+	evidenceValue, err := strconv.ParseFloat(multipleMatch[1], 64)
+	if err != nil || evidenceValue != *extracted.SmallNII {
+		return "", fmt.Errorf("AI value does not match the multiple in its evidence")
+	}
 	return strconv.FormatFloat(*extracted.SmallNII, 'f', -1, 64) + "x", nil
 }
 
@@ -521,7 +534,15 @@ func buildEmail(ipos []IPO, today time.Time) string {
 		return body.String()
 	}
 	for _, ipo := range ipos {
-		fmt.Fprintf(&body, "IPO Name: %s\nRetail Subscription: %s x\nsNII Subscription: %s\nGMP: %s (%s)\n\n", ipo.Name, ipo.RetailSubscription, ipo.SmallNIISubscription, ipo.GreyMarketPremium, ipo.GreyMarketPremiumPercent)
+		sniiLabel := "sNII Subscription"
+		if ipo.SmallNIIFromAI {
+			sniiLabel += " (AI fallback)"
+		}
+		fmt.Fprintf(&body, "IPO Name: %s\nRetail Subscription: %s x\n%s: %s\n", ipo.Name, ipo.RetailSubscription, sniiLabel, ipo.SmallNIISubscription)
+		if ipo.SmallNIISourceURL != "" {
+			fmt.Fprintf(&body, "sNII Source: %s\n", ipo.SmallNIISourceURL)
+		}
+		fmt.Fprintf(&body, "GMP: %s (%s)\n\n", ipo.GreyMarketPremium, ipo.GreyMarketPremiumPercent)
 	}
 	body.WriteString("Source: IPOWatch. GMP is unofficial and may change.\n")
 	return body.String()
