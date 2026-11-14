@@ -27,6 +27,8 @@ const (
 	defaultTimezone = "Asia/Kolkata"
 )
 
+var openAIChatCompletionsURL = "https://api.openai.com/v1/chat/completions"
+
 var gmpPercentPattern = regexp.MustCompile(`([+-]?[0-9]+[.]?[0-9]*)%`)
 
 type IPO struct {
@@ -354,7 +356,7 @@ PAGE CONTENT:
 		return "", fmt.Errorf("encode AI request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIChatCompletionsURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
