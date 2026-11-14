@@ -356,16 +356,19 @@ func evidenceFieldHasValue(key, evidence string, expected float64) bool {
 	}
 	if start < 0 || end >= len(evidence) { return false }
 	afterLabel := evidence[end:]
-	var match []string
+	var numericValue string
 	if key == "gmp_percentage" {
-		match = percentValueRE.FindStringSubmatch(afterLabel)
+		match := percentValueRE.FindStringSubmatch(afterLabel)
+		if len(match) < 2 { return false }
+		numericValue = match[1]
 	} else if key == "gmp" {
-		match = numberRE.FindStringSubmatch(afterLabel)
+		numericValue = numberRE.FindString(afterLabel)
 	} else {
-		match = multipleRE.FindStringSubmatch(afterLabel)
+		match := multipleRE.FindStringSubmatch(afterLabel)
+		if len(match) < 2 { return false }
+		numericValue = match[1]
 	}
-	if len(match) < 2 { return false }
-	value, err := strconv.ParseFloat(strings.ReplaceAll(match[1], ",", ""), 64)
+	value, err := strconv.ParseFloat(strings.ReplaceAll(numericValue, ",", ""), 64)
 	return err == nil && abs(value-expected) < 0.0001
 }
 
