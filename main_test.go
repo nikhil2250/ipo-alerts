@@ -11,183 +11,200 @@ import (
 	"time"
 )
 
-func TestParseSubscriptionTable(t *testing.T) {
-	page := []byte(`<table><tbody><tr><td>Test IPO</td><td>SME</td><td>November 3, 2026</td><td>1.0</td><td>2.0</td><td>3.25</td><td>2.5</td><td>12:00</td></tr></tbody></table>`)
-	ipos, err := parseSubscriptionTable(page)
-	if err != nil {
-		t.Fatal(err)
+func floatPtr(value float64) *float64 { return &value }
+
+func TestHTMLToTextRemovesMarkupAndNonVisibleBlocks(t *testing.T) {
+	page := []byte("<html><style>.x{display:none}</style><script>alert('x')</script><!--comment--><body><h1>Test IPO</h1><p>Retail &amp; NII 3.42x</p></body></html>")
+	got := htmlToText(page)
+	for _, want := range []string{"Test IPO", "Retail & NII 3.42x"} {
+		if !strings.Contains(got, want) { t.Fatalf("text %q does not contain %q", got, want) }
 	}
-	if len(ipos) != 1 || ipos[0].Name != "Test IPO" || ipos[0].Category != "SME" || ipos[0].RetailSubscription != "3.25" {
-		t.Fatalf("unexpected IPO data: %#v", ipos)
-	}
-	if got := ipos[0].ClosingDate.Format("2006-01-02"); got != "2026-11-03" {
-		t.Fatalf("closing date = %s, want 2026-11-03", got)
+	for _, unwanted := range []string{"alert", "display:none", "comment", "<h1>"} {
+		if strings.Contains(got, unwanted) { t.Fatalf("text still contains %q: %s", unwanted, got) }
 	}
 }
 
-func TestParseGMPTable(t *testing.T) {
-	page := []byte(`<h3>Current Mainboard IPO</h3><table><tbody><tr><td>Closed IPO Closed</td><td>₹9</td><td>🟢</td><td>₹82</td><td>₹91 (10.98%)</td><td>29-2 Nov</td></tr></tbody></table><h3>Current SME IPO</h3><table><tbody><tr><td>SME IPO Open</td><td>₹99</td><td>🟢</td><td>₹100</td><td>₹199 (99.00%)</td><td>2-4 Nov</td></tr></tbody></table>`)
-	ipos, err := parseGMPTable(page)
-	if err != nil {
-		t.Fatal(err)
+func TestExtractedIPOJSONUnmarshal(t *testing.T) {
+	data := []byte("{\"ipos\":[{\"name\":\"Test IPO\",\"category\":\"Mainboard\",\"closing_date\":\"2026-11-14\",\"retail_subscription\":3.42,\"snii_subscription\":null,\"evidence\":{\"name\":\"Test IPO\"}}]}")
+	var response aiPageResponse
+	if err := json.Unmarshal(data, &response); err != nil { t.Fatal(err) }
+	if len(response.IPOs) != 1 { t.Fatalf("got %d IPOs, want 1", len(response.IPOs)) }
+	got := response.IPOs[0]
+	if got.Name != "Test IPO" || got.Category != "Mainboard" || got.ClosingDate != "2026-11-14" { t.Fatalf("unexpected IPO: %#v", got) }
+	if got.Retail == nil || *got.Retail != 3.42 { t.Fatalf("retail = %v, want 3.42", got.Retail) }
+	if got.SmallNII != nil { t.Fatalf("missing sNII should be nil, got %v", *got.SmallNII) }
+}
+
+func validSubscriptionIPO() (ExtractedIPO, string) {
+	source := "Apex Technologies IPO Mainboard opening date 12 November 2026 closing date 14 November 2026 Retail subscription 3.42x sNII subscription 8.15x bNII subscription 11.20x QIB subscription 5.60x total subscription 6.75x"
+	item := ExtractedIPO{
+		Name: "Apex Technologies IPO",
+		Category: "Mainboard",
+		OpeningDate: "2026-11-12",
+		ClosingDate: "2026-11-14",
+		Retail: floatPtr(3.42),
+		SmallNII: floatPtr(8.15),
+		BigNII: floatPtr(11.20),
+		QIB: floatPtr(5.60),
+		Total: floatPtr(6.75),
+		Evidence: map[string]string{
+			"name": "Apex Technologies IPO",
+			"category": "Apex Technologies IPO Mainboard",
+			"opening_date": "Apex Technologies IPO opening date 12 November 2026",
+			"closing_date": "Apex Technologies IPO closing date 14 November 2026",
+			"retail_subscription": "Apex Technologies IPO Retail subscription 3.42x",
+			"snii_subscription": "Apex Technologies IPO sNII subscription 8.15x",
+			"bnii_subscription": "Apex Technologies IPO bNII subscription 11.20x",
+			"qib_subscription": "Apex Technologies IPO QIB subscription 5.60x",
+			"total_subscription": "Apex Technologies IPO total subscription 6.75x",
+		},
 	}
-	if len(ipos) != 1 || ipos[0].Name != "Closed IPO" || ipos[0].GreyMarketPremium != "₹9" || ipos[0].GreyMarketPremiumPercent != "10.98%" {
-		t.Fatalf("unexpected Mainboard IPO data: %#v", ipos)
+	return item, source
+}
+
+func TestValidateExtractedIPOAcceptsVerifiableSubscription(t *testing.T) {
+	item, source := validSubscriptionIPO()
+	if err := validateExtractedIPO(item, source, "subscription"); err != nil { t.Fatalf("valid data rejected: %v", err) }
+}
+
+func TestValidateExtractedIPORejectsUnsupportedEvidence(t *testing.T) {
+	item, source := validSubscriptionIPO()
+	item.Retail = floatPtr(9.99)
+	if err := validateExtractedIPO(item, source, "subscription"); err == nil || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("expected evidence mismatch, got %v", err)
 	}
 }
 
-func TestParseSmallNIISubscription(t *testing.T) {
-	page := []byte(`<table><tr><td>sNII &lt; ₹10L</td><td>8,50,000</td><td>0.00%</td></tr></table><table><tr><td>sNII &lt; ₹10L</td><td>11.71x</td><td>8,50,000</td><td>99,49,576</td><td>₹161.18 Cr</td></tr></table>`)
-	got, err := parseSmallNIISubscription(page)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "11.71x" {
-		t.Fatalf("sNII subscription = %q, want 11.71x", got)
+func TestValidateExtractedIPORejectsTotalNIIAsSNIIWithoutEvidence(t *testing.T) {
+	item, source := validSubscriptionIPO()
+	item.SmallNII = floatPtr(11.20)
+	if err := validateExtractedIPO(item, source, "subscription"); err == nil {
+		t.Fatal("expected mismatched sNII evidence to be rejected")
 	}
 }
 
-func TestIPODetailsURL(t *testing.T) {
-	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.live/mksons-fine-jewels-ipo-details/" {
-		t.Fatalf("detail URL = %q", got)
+func TestConvertSubscriptionRows(t *testing.T) {
+	item, _ := validSubscriptionIPO()
+	location := time.FixedZone("IST", 5*60*60+30*60)
+	got, err := convertSubscriptionRows([]ExtractedIPO{item}, location)
+	if err != nil { t.Fatal(err) }
+	if len(got) != 1 || got[0].Name != item.Name { t.Fatalf("unexpected result: %#v", got) }
+	if got[0].RetailSubscription != "3.42" || got[0].SmallNIISubscription != "8.15" || got[0].BigNIISubscription != "11.2" {
+		t.Fatalf("unexpected subscription values: %#v", got[0])
 	}
 }
 
-func TestBuildEmailForNoMainboardIPOs(t *testing.T) {
-	message := buildEmail(nil, time.Date(2026, time.November, 3, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60)))
-	if !strings.Contains(message, "No Mainboard IPOs are listed today") {
-		t.Fatalf("unexpected empty report: %s", message)
+func TestSelectClosingTodayKeepsOnlyMainboard(t *testing.T) {
+	ist := time.FixedZone("IST", 5*60*60+30*60)
+	today := time.Date(2026, time.November, 14, 12, 0, 0, 0, ist)
+	tomorrow := today.AddDate(0, 0, 1)
+	subscriptions := []IPO{
+		{Name: "Apex Technologies IPO", Category: "Mainboard", ClosingDate: today},
+		{Name: "SME Example IPO", Category: "SME", ClosingDate: today},
+		{Name: "Tomorrow IPO", Category: "Mainboard", ClosingDate: tomorrow},
 	}
+	gmp := []ExtractedIPO{{Name: "Apex Technologies IPO", GMP: floatPtr(25), GMPPercent: floatPtr(12.5)}}
+	got := selectClosingToday(subscriptions, gmp, today, ist)
+	if len(got) != 1 { t.Fatalf("got %d records, want 1: %#v", len(got), got) }
+	if got[0].GreyMarketPremium != "₹25" || got[0].GreyMarketPremiumPercent != "12.5%" { t.Fatalf("GMP not joined: %#v", got[0]) }
 }
 
-func TestBuildEmailIncludesRequestedMetrics(t *testing.T) {
+func TestFindExtractedIPORejectsAmbiguousPrefix(t *testing.T) {
+	rows := []ExtractedIPO{{Name: "Apex Technologies"},{Name: "Apex Technologies Limited"}}
+	if _, ok := findExtractedIPO("Apex Technologies", rows); ok { t.Fatal("ambiguous match should be rejected") }
+}
+
+func TestBuildEmailIncludesAllMetricsAndSources(t *testing.T) {
+	today := time.Date(2026, time.November, 14, 12, 0, 0, 0, time.UTC)
 	ipo := IPO{
-		Name:                     "Test IPO",
-		RetailSubscription:       "3.08",
-		SmallNIISubscription:     "11.71x",
-		GreyMarketPremium:        "₹9",
-		GreyMarketPremiumPercent: "10.98%",
+		Name: "Apex Technologies IPO",
+		ClosingDate: today,
+		RetailSubscription: "3.42",
+		SmallNIISubscription: "8.15",
+		BigNIISubscription: "11.2",
+		QIBSubscription: "5.6",
+		TotalSubscription: "6.75",
+		GreyMarketPremium: "₹25",
+		GreyMarketPremiumPercent: "12.5%",
+		SubscriptionSourceURL: subscriptionURL,
+		GMPSourceURL: gmpURL,
 	}
-	message := buildEmail([]IPO{ipo}, time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC))
-	for _, expected := range []string{"Retail Subscription: 3.08 x", "sNII Subscription: 11.71x", "GMP: ₹9 (10.98%)"} {
-		if !strings.Contains(message, expected) {
-			t.Errorf("email missing %q: %s", expected, message)
-		}
+	message := buildEmail([]IPO{ipo}, today)
+	for _, want := range []string{"Retail Subscription: 3.42x","sNII Subscription: 8.15x","bNII Subscription: 11.2x","QIB Subscription: 5.6x","Total Subscription: 6.75x","GMP: ₹25 (12.5%)",subscriptionURL,gmpURL} {
+		if !strings.Contains(message, want) { t.Errorf("email missing %q: %s", want, message) }
 	}
+}
+
+func TestBuildEmailForNoIPOs(t *testing.T) {
+	message := buildEmail(nil, time.Now())
+	if !strings.Contains(message, "No Mainboard IPOs are scheduled to close today") { t.Fatalf("unexpected empty report: %s", message) }
 }
 
 func TestSendReportSkipsEmailWhenNoIPOsClose(t *testing.T) {
-	today := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60))
-	if err := sendReport(nil, today); err != nil {
-		t.Fatalf("empty report should skip SMTP without requiring configuration: %v", err)
-	}
+	if err := sendReport(nil, time.Now()); err != nil { t.Fatalf("empty report should skip SMTP: %v", err) }
 }
 
 func TestParseRecipients(t *testing.T) {
 	recipients := parseRecipients("first@example.com, second@example.com ,")
-	if len(recipients) != 2 || recipients[0] != "first@example.com" || recipients[1] != "second@example.com" {
-		t.Fatalf("unexpected recipients: %#v", recipients)
-	}
+	if len(recipients) != 2 || recipients[0] != "first@example.com" || recipients[1] != "second@example.com" { t.Fatalf("unexpected recipients: %#v", recipients) }
 }
 
-func TestSelectClosingToday(t *testing.T) {
-	today := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60))
-	tomorrow := today.AddDate(0, 0, 1)
-	subscriptions := []IPO{
-		{Name: "First Closed IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "1.25"},
-		{Name: "SFC Environmental", Category: "Mainboard", ClosingDate: today, RetailSubscription: "2.71"},
-		{Name: "Third Closing IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "3.50"},
-		{Name: "Fourth Closing IPO", Category: "Mainboard", ClosingDate: today, RetailSubscription: "4.75"},
-		{Name: "SME IPO", Category: "SME", ClosingDate: today, RetailSubscription: "50.00"},
-		{Name: "Tomorrow IPO", Category: "Mainboard", ClosingDate: tomorrow, RetailSubscription: "9.00"},
-	}
-	gmpIPOs := []IPO{
-		{Name: "First Closed IPO", Category: "Mainboard", GreyMarketPremium: "₹9", GreyMarketPremiumPercent: "10.98%"},
-		{Name: "SFC Environmental Technologies", Category: "Mainboard", GreyMarketPremium: "₹15", GreyMarketPremiumPercent: "4.55%"},
-		{Name: "Third Closing IPO", Category: "Mainboard", GreyMarketPremium: "₹5", GreyMarketPremiumPercent: "5.00%"},
-		{Name: "Fourth Closing IPO", Category: "Mainboard", GreyMarketPremium: "₹7", GreyMarketPremiumPercent: "7.00%"},
-	}
-	selected := selectClosingToday(subscriptions, gmpIPOs, today)
-	if len(selected) != 4 {
-		t.Fatalf("got %d IPOs, want all 4 Mainboard IPOs closing today: %#v", len(selected), selected)
-	}
-	if selected[1].Name != "SFC Environmental Technologies" || selected[1].RetailSubscription != "2.71" || selected[1].GreyMarketPremium != "₹15" || selected[1].GreyMarketPremiumPercent != "4.55%" {
-		t.Fatalf("IPO metrics were not joined correctly: %#v", selected[1])
-	}
-	if selected[3].Name != "Fourth Closing IPO" {
-		t.Fatalf("closing IPOs were unexpectedly limited: %#v", selected)
-	}
+func TestIPODetailsURL(t *testing.T) {
+	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.live/mksons-fine-jewels-ipo-details/" { t.Fatalf("detail URL = %q", got) }
 }
 
-func TestNormalizeNameIgnoresPunctuationAndCase(t *testing.T) {
-	if normalizeName("M.K. Sons Fine Jewels") != normalizeName("m k sons fine-jewels") {
-		t.Fatal("equivalent IPO names should normalize to the same key")
-	}
-}
-
-
-func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
+func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
 	t.Setenv("NVIDIA_API_KEY", "test-key")
 	t.Setenv("NVIDIA_MODEL", "test-model")
-
 	originalURL := nvidiaChatCompletionsURL
 	defer func() { nvidiaChatCompletionsURL = originalURL }()
 
+	item, source := validSubscriptionIPO()
+	responseJSON, err := json.Marshal(map[string]any{
+		"ipos": []any{map[string]any{
+			"name": item.Name, "category": item.Category, "opening_date": item.OpeningDate,
+			"closing_date": item.ClosingDate, "retail_subscription": item.Retail,
+			"snii_subscription": item.SmallNII, "bnii_subscription": item.BigNII,
+			"qib_subscription": item.QIB, "total_subscription": item.Total,
+			"evidence": item.Evidence,
+		}},
+	})
+	if err != nil { t.Fatal(err) }
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("method = %s, want POST", r.Method)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-			t.Errorf("authorization = %q", got)
-		}
-		var request aiChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		if request.Model != "test-model" {
-			t.Errorf("model = %q, want test-model", request.Model)
-		}
-		response := aiChatResponse{}
-		response.Choices = append(response.Choices, struct {
-			Message aiChatMessage `json:"message"`
-		}{Message: aiChatMessage{
-			Role: "assistant",
-			Content: `{"ipo_name":"Test IPO","snii_subscription":11.71,"evidence":"sNII < ₹10L 11.71x"}`,
-		}})
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("encode response: %v", err)
-		}
+		if r.Method != http.MethodPost { t.Errorf("method = %s, want POST", r.Method) }
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" { t.Errorf("authorization = %q", got) }
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil { t.Errorf("decode NVIDIA request: %v", err) }
+		if request["model"] != "test-model" { t.Errorf("model = %v, want test-model", request["model"]) }
+		_ = source
+		_ = fmt.Fprint(w, string(mustJSON(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": string(responseJSON)}}}})))
 	}))
 	defer server.Close()
 	nvidiaChatCompletionsURL = server.URL
 
-	page := []byte(`<table><tr><td>sNII &lt; ₹10L</td><td>11.71x</td></tr></table>`)
-	got, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
-	if err != nil {
-		t.Fatalf("extractSmallNIIWithAI returned error: %v", err)
-	}
-	if got != "11.71x" {
-		t.Fatalf("sNII = %q, want 11.71x", got)
-	}
+	rows, err := extractIPOsWithAI(context.Background(), "subscription", "", subscriptionURL, []byte(source))
+	if err != nil { t.Fatalf("AI extraction failed: %v", err) }
+	if len(rows) != 1 || rows[0].Name != item.Name { t.Fatalf("unexpected extraction: %#v", rows) }
 }
 
-func TestExtractSmallNIIWithAIRejectsEvidenceNotInPage(t *testing.T) {
+func TestExtractIPOsWithAIRejectsInvalidEvidence(t *testing.T) {
 	t.Setenv("NVIDIA_API_KEY", "test-key")
 	t.Setenv("NVIDIA_MODEL", "test-model")
-
 	originalURL := nvidiaChatCompletionsURL
 	defer func() { nvidiaChatCompletionsURL = originalURL }()
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"{\"ipo_name\":\"Test IPO\",\"snii_subscription\":11.71,\"evidence\":\"sNII 11.71x\"}"}}]}`)
+		content := "{\"ipos\":[{\"name\":\"Wrong IPO\",\"category\":\"Mainboard\",\"closing_date\":\"2026-11-14\",\"evidence\":{\"name\":\"Wrong IPO\",\"category\":\"Wrong IPO Mainboard\",\"closing_date\":\"Wrong IPO closing 14 November 2026\"}}]}"
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": content}}}})
 	}))
 	defer server.Close()
 	nvidiaChatCompletionsURL = server.URL
+	_, err := extractIPOsWithAI(context.Background(), "subscription", "", subscriptionURL, []byte("Page says Other IPO Mainboard closes 14 November 2026 with enough descriptive text to exceed the minimum characters."))
+	if err == nil { t.Fatal("expected source validation error") }
+}
 
-	page := []byte(`<table><tr><td>Retail</td><td>11.71x</td></tr></table>`)
-	_, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
-	if err == nil || !strings.Contains(err.Error(), "evidence") {
-		t.Fatalf("expected evidence validation error, got %v", err)
-	}
+func mustJSON(value any) []byte {
+	data, err := json.Marshal(value)
+	if err != nil { panic(err) }
+	return data
 }
