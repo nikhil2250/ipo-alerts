@@ -178,7 +178,7 @@ func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil { t.Errorf("decode NVIDIA request: %v", err) }
 		if request["model"] != "test-model" { t.Errorf("model = %v, want test-model", request["model"]) }
 		_ = source
-		_ = fmt.Fprint(w, string(mustJSON(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": string(responseJSON)}}}})))
+		_, _ = fmt.Fprint(w, string(mustJSON(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": string(responseJSON)}}}})))
 	}))
 	defer server.Close()
 	nvidiaChatCompletionsURL = server.URL
