@@ -50,7 +50,7 @@ func validSubscriptionIPO() (ExtractedIPO, string) {
 		Total: floatPtr(6.75),
 		Evidence: map[string]string{
 			"name": row,
-			"category": row,
+			"category": "Mainboard",
 			"opening_date": row,
 			"closing_date": row,
 			"retail_subscription": row,
@@ -61,6 +61,21 @@ func validSubscriptionIPO() (ExtractedIPO, string) {
 		},
 	}
 	return item, source
+}
+
+
+func TestEvidenceBelongsToIPOAllowsCellEvidenceFromSameRow(t *testing.T) {
+	source := "Crystal Crop Protection Mainboard 14 November 2026\nWatrana Rentals SME 15 November 2026"
+	if !evidenceBelongsToIPO("Crystal Crop Protection", "Mainboard", source) {
+		t.Fatal("category cell should be accepted when it belongs to the Crystal Crop Protection row")
+	}
+}
+
+func TestEvidenceBelongsToIPORejectsNeighbouringIPOValue(t *testing.T) {
+	source := "Crystal Crop Protection Mainboard 14 November 2026\nWatrana Rentals SME 15 November 2026"
+	if evidenceBelongsToIPO("Crystal Crop Protection", "SME", source) {
+		t.Fatal("category from neighbouring IPO row must not be accepted")
+	}
 }
 
 func TestValidateExtractedIPOAcceptsVerifiableSubscription(t *testing.T) {
