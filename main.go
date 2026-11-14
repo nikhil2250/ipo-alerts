@@ -146,7 +146,11 @@ func run() error {
 	closingIPOs := selectClosingToday(subscriptions, gmpRows, today, location)
 	log.Printf("found %d Mainboard IPOs closing today (%s)", len(closingIPOs), today.Format("2006-01-02"))
 	for index := range closingIPOs {
-		if closingIPOs[index].SmallNIISubscription != "Not available" && closingIPOs[index].BigNIISubscription != "Not available" { continue }
+		if closingIPOs[index].RetailSubscription != "Not available" &&
+			closingIPOs[index].SmallNIISubscription != "Not available" &&
+			closingIPOs[index].BigNIISubscription != "Not available" &&
+			closingIPOs[index].QIBSubscription != "Not available" &&
+			closingIPOs[index].TotalSubscription != "Not available" { continue }
 		detailURL := ipoDetailsURL(closingIPOs[index].Name)
 		closingIPOs[index].DetailSourceURL = detailURL
 		detailPage, fetchErr := fetchPage(ctx, detailURL)
@@ -211,6 +215,7 @@ func extractIPOsWithAI(ctx context.Context, sourceType, requestedIPO, sourceURL 
 		},
 		"temperature": 0.1,
 		"max_tokens": 12000,
+		"stream": false,
 		"response_format": map[string]string{"type": "json_object"},
 		"chat_template_kwargs": map[string]bool{"enable_thinking": false},
 	}
@@ -307,6 +312,7 @@ func validateEvidence(item ExtractedIPO, key, expectedText, sourceText string, c
 	quote := strings.TrimSpace(item.Evidence[key])
 	if quote == "" { return fmt.Errorf("missing evidence for %s", key) }
 	if !strings.Contains(normalizeEvidence(sourceText), normalizeEvidence(quote)) { return fmt.Errorf("evidence for %s is not present in source text", key) }
+	if !strings.Contains(normalizeName(quote), normalizeName(item.Name)) { return fmt.Errorf("evidence for %s does not identify IPO %q", key, item.Name) }
 	if expectedText != "" && !strings.Contains(normalizeName(quote), normalizeName(expectedText)) { return fmt.Errorf("evidence for %s does not support %q", key, expectedText) }
 	if checkNumber && expectedNumber != nil && !evidenceHasNumber(quote, *expectedNumber) { return fmt.Errorf("evidence for %s does not contain extracted value %v", key, *expectedNumber) }
 	return nil
