@@ -284,28 +284,37 @@ func buildExtractionPrompt(sourceType, requestedIPO, sourceURL, pageText string)
 	scope := "Extract all IPOs explicitly listed on this page."
 	switch sourceType {
 	case "subscription":
-		scope = "Extract every current IPO row on this subscription page: IPO name, category (Mainboard or SME), closing date, and the QIB, NII, Retail and Total subscription values. Extract sNII and bNII only when the source explicitly shows them as separate categories. A combined NII value must NOT be copied into sNII or bNII."
+		scope = "Extract every current IPO row on this subscription page: IPO name, category (Mainboard or SME), closing date, Retail, sNII, bNII, QIB and total subscription values. Extract sNII and bNII only when the source explicitly shows them as separate categories. Never copy combined NII into sNII or bNII."
 	case "gmp":
-		scope = "Extract every IPO listed on this GMP page: IPO name, GMP in rupees and GMP percentage where present."
+		scope = "Extract every IPO on this GMP page: IPO name, GMP in rupees and GMP percentage where present."
 	case "ipo_detail":
-		scope = "Extract subscription values for the requested IPO only. Return Retail, sNII, bNII, QIB and total subscription multiples where explicitly present."
+		scope = "Extract subscription values for the requested IPO only: Retail, sNII, bNII, QIB and total where explicitly present."
 	}
-	return fmt.Sprintf("Extract Indian IPO information from the supplied website text.\nSOURCE TYPE: %s\nSOURCE URL: %s\nREQUESTED IPO: %s\nTASK: %s\n\nIMPORTANT EXTRACTION RULES:\n1. Use only the supplied page text. Never use model knowledge, estimates, memory or other websites.\n2. Return one object per distinct IPO row. Do not include navigation links, related articles or stale cards unless they are actual data rows in the subscription/GMP table.\n3. `record_evidence`: copy the COMPLETE exact source row containing this IPO's name and its row values. It must be a contiguous substring of the supplied text. Do not paraphrase it.
-4. Category evidence may be just `Mainboard` or `SME`. Do not repeat the IPO name unless it appears in the cell.
-5. Closing date is REQUIRED for subscription-page IPO rows. Read it from the closing-date column. If it is not present in that IPO's row, set the date to an empty string; do not invent it.
-6. Opening date is optional. Return empty string when not present.
-7. Subscription values are numeric multiples (e.g. 3.42 means 3.42x), not percentage or application counts.
-8. Keep QIB, NII, Retail and Total in their correct columns. Do not shift values between columns.
-9. The subscription page's combined NII column is NOT sNII. Keep sNII and bNII null unless they are independently shown.
-10. GMP is an absolute rupee amount. GMP percentage is a separate percentage field.
-11. Missing numeric values must be JSON null. Never convert missing data to zero.
-12. Dates must be normalized to YYYY-MM-DD, but the exact date text must also be supported by `record_evidence`.
-13. Every non-null numeric value must appear in that IPO's record_evidence. Field-level evidence entries are optional and should be exact source text when possible.
-14. Never combine values from different IPO rows.
-15. Return ONLY JSON in this structure: {"ipos":[{"name":"IPO name","category":"Mainboard","opening_date":"YYYY-MM-DD","closing_date":"YYYY-MM-DD","retail_subscription":3.42,"snii_subscription":null,"bnii_subscription":null,"qib_subscription":5.6,"total_subscription":4.2,"gmp":25,"gmp_percentage":12.5,"record_evidence":"exact full IPO row copied from source text","evidence":{"name":"exact text","category":"Mainboard","closing_date":"exact date text","retail_subscription":"exact value text"}}]}. If no current IPO rows are present, return {"ipos":[]}.
-
-SOURCE TEXT:
-%s", sourceType, sourceURL, requestedIPO, scope, pageText)
+	lines := []string{
+		"Extract Indian IPO information from the supplied website text.",
+		fmt.Sprintf("SOURCE TYPE: %s", sourceType),
+		fmt.Sprintf("SOURCE URL: %s", sourceURL),
+		fmt.Sprintf("REQUESTED IPO: %s", requestedIPO),
+		fmt.Sprintf("TASK: %s", scope),
+		"",
+		"Rules:",
+		"1. Use only supplied page text. Never use model knowledge, estimates, memory or other websites.",
+		"2. Return one object per current IPO data row. Ignore navigation, unrelated links, advertisements and stale cards.",
+		"3. record_evidence must be the COMPLETE exact source row containing the IPO name and its values. Copy it verbatim as one contiguous substring from the supplied text.",
+		"4. Category is Mainboard or SME only when explicitly shown. Category evidence does not need to repeat the company name.",
+		"5. For subscription pages, closing_date is required and must come from that IPO's row. If not shown, use an empty string; do not invent it. Opening date is optional.",
+		"6. Subscription values are multiples: 3.42 means 3.42x, not a percentage or application count.",
+		"7. Keep QIB, NII, Retail and Total in their correct source columns; do not shift values.",
+		"8. The combined NII column is NOT sNII. Set sNII and bNII to null unless each is independently present.",
+		"9. GMP is an absolute rupee amount. GMP percentage is a separate field.",
+		"10. Missing numeric values must be JSON null, never zero.",
+		"11. Every non-null number must appear in record_evidence. Do not combine values from different IPO rows.",
+		"12. Return only JSON in this shape: {\"ipos\":[{\"name\":\"IPO name\",\"category\":\"Mainboard\",\"opening_date\":\"YYYY-MM-DD\",\"closing_date\":\"YYYY-MM-DD\",\"retail_subscription\":3.42,\"snii_subscription\":null,\"bnii_subscription\":null,\"qib_subscription\":5.6,\"total_subscription\":4.2,\"gmp\":25,\"gmp_percentage\":12.5,\"record_evidence\":\"exact full source row\"}]}. If no current IPO rows exist, return {\"ipos\":[]}.",
+		"",
+		"SOURCE TEXT:",
+		pageText,
+	}
+	return strings.Join(lines, "\n")
 }
 
 func validateExtractedIPO(item ExtractedIPO, sourceText, sourceType string) error {
