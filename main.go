@@ -36,6 +36,8 @@ var (
  tagRE = regexp.MustCompile("<[^>]+>")
  spaceRE = regexp.MustCompile("\\s+")
  numberRE = regexp.MustCompile("-?[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?")
+	multipleRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*x\\b")
+	percentValueRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*%")
 )
 
 type IPO struct {
@@ -320,7 +322,7 @@ func validateEvidence(item ExtractedIPO, key, expectedText, sourceText string, c
 	if !strings.Contains(normalizeEvidence(sourceText), normalizeEvidence(quote)) { return fmt.Errorf("evidence for %s is not present in source text", key) }
 	if !strings.Contains(normalizeName(quote), normalizeName(item.Name)) { return fmt.Errorf("evidence for %s does not identify IPO %q", key, item.Name) }
 	if expectedText != "" && !strings.Contains(normalizeName(quote), normalizeName(expectedText)) { return fmt.Errorf("evidence for %s does not support %q", key, expectedText) }
-	if checkNumber && expectedNumber != nil && !evidenceHasNumber(quote, *expectedNumber) { return fmt.Errorf("evidence for %s does not contain extracted value %v", key, *expectedNumber) }
+	if checkNumber && expectedNumber != nil && (!evidenceHasNumber(quote, *expectedNumber) || !evidenceFieldHasValue(key, quote, *expectedNumber)) { return fmt.Errorf("evidence for %s does not show extracted value %v beside its field label", key, *expectedNumber) }
 	return nil
 }
 
@@ -330,6 +332,41 @@ func evidenceHasNumber(evidence string, expected float64) bool {
 		if err == nil && abs(candidate-expected) < 0.0001 { return true }
 	}
 	return false
+}
+
+func evidenceFieldHasValue(key, evidence string, expected float64) bool {
+	lower := strings.ToLower(evidence)
+	labels := map[string][]string{
+		"retail_subscription": {"retail", "rii"},
+		"snii_subscription": {"snii", "small nii"},
+		"bnii_subscription": {"bnii", "big nii"},
+		"qib_subscription": {"qib"},
+		"total_subscription": {"total"},
+		"gmp": {"gmp"},
+		"gmp_percentage": {"gmp"},
+	}
+	start := -1
+	end := -1
+	for _, label := range labels[key] {
+		index := strings.Index(lower, label)
+		if index >= 0 && (start < 0 || index < start) {
+			start = index
+			end = index + len(label)
+		}
+	}
+	if start < 0 || end >= len(evidence) { return false }
+	afterLabel := evidence[end:]
+	var match []string
+	if key == "gmp_percentage" {
+		match = percentValueRE.FindStringSubmatch(afterLabel)
+	} else if key == "gmp" {
+		match = numberRE.FindStringSubmatch(afterLabel)
+	} else {
+		match = multipleRE.FindStringSubmatch(afterLabel)
+	}
+	if len(match) < 2 { return false }
+	value, err := strconv.ParseFloat(strings.ReplaceAll(match[1], ",", ""), 64)
+	return err == nil && abs(value-expected) < 0.0001
 }
 
 func normalizeEvidence(value string) string {
