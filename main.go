@@ -33,7 +33,7 @@ var (
  scriptRE = regexp.MustCompile("(?is)<script\\b[^>]*>.*?</script\\s*>")
  styleRE = regexp.MustCompile("(?is)<style\\b[^>]*>.*?</style\\s*>")
  commentRE = regexp.MustCompile("(?s)<!--.*?-->")
-	blockBreakRE = regexp.MustCompile("(?i)<br\\b[^>]*>|</(?:tr|p|div|li|h[1-6]|section|article|header|footer|ul|ol|table)\\s*>")
+	blockBreakRE = regexp.MustCompile("(?i)<br\\b[^>]*>|</(?:tr|table)\\s*>")
  tagRE = regexp.MustCompile("<[^>]+>")
  spaceRE = regexp.MustCompile("\\s+")
  numberRE = regexp.MustCompile("-?[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?")
