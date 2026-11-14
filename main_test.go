@@ -127,8 +127,8 @@ func TestNormalizeNameIgnoresPunctuationAndCase(t *testing.T) {
 
 
 func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_MODEL", "test-model")
+	t.Setenv("NVIDIA_API_KEY", "test-key")
+	t.Setenv("NVIDIA_MODEL", "test-model")
 
 	originalURL := nvidiaChatCompletionsURL
 	defer func() { nvidiaChatCompletionsURL = originalURL }()
@@ -173,8 +173,8 @@ func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
 }
 
 func TestExtractSmallNIIWithAIRejectsEvidenceNotInPage(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_MODEL", "test-model")
+	t.Setenv("NVIDIA_API_KEY", "test-key")
+	t.Setenv("NVIDIA_MODEL", "test-model")
 
 	originalURL := nvidiaChatCompletionsURL
 	defer func() { nvidiaChatCompletionsURL = originalURL }()
