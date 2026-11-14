@@ -1,28 +1,49 @@
 # IPO Closing Alerts
 
-A Go application that emails Mainboard IPOs closing today, with Retail subscription, sNII subscription, GMP, and GMP percentage. SME IPOs and IPOs closing on other dates are excluded.
+A Go application that checks current Indian IPO listings, identifies **Mainboard IPOs closing today**, and sends a consolidated email with subscription and grey-market information.
 
-## Configure email
+The report includes Retail, sNII, bNII, QIB and total subscription multiples when the source publishes them, plus GMP and GMP percentage when available. SME IPOs and IPOs closing on other dates are excluded.
 
-The application reads SMTP settings from environment variables:
+## How it works
 
-| Variable | Required | Example |
-| --- | --- | --- |
-| `SMTP_HOST` | Yes | `smtp.gmail.com` |
-| `SMTP_PORT` | No | `587` |
-| `SMTP_USERNAME` | For authenticated SMTP | Your SMTP username |
-| `SMTP_PASSWORD` | For authenticated SMTP | Your SMTP password or app password |
-| `MAIL_FROM` | Yes | Sender email address |
-| `MAIL_TO` | Yes | Recipient email address; multiple addresses may be comma-separated |
-| `TIMEZONE` | No | `Asia/Kolkata` |
+1. Fetch the current IPOWatch subscription listing: https://ipowatch.in/subscription/
+2. Convert the fetched page markup to readable text. The application does not use an HTML DOM parser, table parser or fixed table-column positions.
+3. Send the page text to NVIDIA NIM for structured IPO extraction.
+4. Validate each result against its complete source-row evidence (`record_evidence`), including category, closing date and any extracted numeric values.
+5. Keep only Mainboard IPOs whose closing date is today in the configured timezone.
+6. Enrich matching IPOs with GMP from https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/.
+7. When sNII or bNII is missing, fetch the IPO-specific subscription-detail page and ask NVIDIA to extract those fields if they are explicitly shown.
+8. Send the report using SMTP, unless there are no qualifying IPOs or DRY_RUN is enabled.
 
-For Gmail, use an app password rather than your account password. Do not commit credentials.
+**Important data rules:** A combined NII value is not treated as sNII or bNII. Missing values remain unavailable; the model must not estimate or invent them. GMP is unofficial and may change, so verify it independently before making investment decisions.
+
+## Configuration
+
+The application reads a `.env` file from the current directory when run locally. In GitHub Actions, configure the following repository secrets and variables.
+
+| Name | Type | Required | Default / purpose |
+| --- | --- | --- | --- |
+| `NVIDIA_API_KEY` | Secret | Yes | NVIDIA NIM authentication key |
+| `NVIDIA_MODEL` | Variable | No | `nvidia/nemotron-3.5-lightning-30b-a3b` |
+| `TIMEZONE` | Variable / environment | No | `Asia/Kolkata` |
+| `SMTP_HOST` | Variable | For email | `smtp.gmail.com` in the workflow |
+| `SMTP_PORT` | Variable | No | `587` |
+| `SMTP_USERNAME` | Secret | For authenticated SMTP | SMTP username |
+| `SMTP_PASSWORD` | Secret | For authenticated SMTP | SMTP password or Gmail app password |
+| `MAIL_FROM` | Secret | When sending email | Sender address |
+| `MAIL_TO` | Secret | When sending email | Comma-separated recipient addresses |
+| `DRY_RUN` | Environment | No | `true` prints a report instead of sending email |
+
+Do not commit API keys, SMTP passwords or `.env` files. For Gmail, use an app password rather than your account password.
 
 ## Run locally
 
-The app loads `.env` from the current directory automatically. Add these entries:
+Create a `.env` file:
 
 ```dotenv
+NVIDIA_API_KEY=your-nvidia-api-key
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
+TIMEZONE=Asia/Kolkata
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-address@example.com
@@ -31,49 +52,47 @@ MAIL_FROM=your-address@example.com
 MAIL_TO=recipient@example.com,another@example.com
 ```
 
-Keep `.env` private; it is ignored by Git. Variables already exported in your shell take precedence over values in `.env`.
+Run the application:
 
 ```sh
 go run .
 ```
 
-Run the test suite with `go test ./...`.
+Run tests:
 
-Set `DRY_RUN=true` to print the report locally without connecting to SMTP.
+```sh
+go test ./...
+```
 
-## GitHub Actions
+Set `DRY_RUN=true` in the environment to print a non-empty report without sending email. When no qualifying IPOs are found, the application skips SMTP and exits successfully.
 
-The workflow runs daily at 11:00 and 13:00 India Standard Time. GitHub Actions schedules use UTC, so these are configured as 05:30 and 07:30 UTC. Scheduled workflows run from the repository's default branch; GitHub may delay scheduled starts during busy periods.
+## GitHub Actions schedule
 
-Add these repository Actions secrets:
+The workflow is `.github/workflows/ipo-alerts.yml` and runs automatically every day:
 
-- `SMTP_USERNAME`
-- `SMTP_PASSWORD`
-- `MAIL_FROM`
-- `MAIL_TO`
+| UTC cron | Scheduled time (IST) |
+| --- | --- |
+| `30 5 * * *` | **11:00 AM IST** |
+| `30 7 * * *` | **1:00 PM IST** |
 
-Optionally add repository Actions variables `SMTP_HOST` and `SMTP_PORT`; they default to `smtp.gmail.com` and `587`. Use **Actions > IPO closing alerts > Run workflow** to test a run manually.
+GitHub Actions schedules use UTC. Scheduled runs set `TIMEZONE=Asia/Kolkata`, run `go test ./...`, and then execute `go run .`. GitHub may delay scheduled starts during periods of high platform load.
 
-## Data extraction
+To test manually, open **Actions → IPO closing alerts → Run workflow**. The `dry_run` input defaults to `true`, so a manual run does not send email unless you explicitly turn dry-run off. Scheduled runs use `DRY_RUN=false`.
 
-The application fetches the IPOWatch's current subscription page (/subscription/) and GMP page, converts visible page markup into plain text, and sends that text to NVIDIA NIM for structured IPO extraction. It does not use HTML DOM parsing, table parsing, or fixed column positions.
+## NVIDIA AI extraction
 
-The subscription page is the source for IPO name, category, opening/closing dates, Retail, sNII, bNII, QIB and total subscription wherever those values are published. The GMP page enriches matching IPO records with GMP and GMP percentage. For closing-today Mainboard IPOs with missing sNII or bNII, the application fetches the IPO-specific subscription-detail page and asks NVIDIA to extract the missing fields.
+The application uses NVIDIA's OpenAI-compatible chat-completions endpoint:
 
-The model must return source evidence for each extracted field. Go checks that evidence is present in the fetched page text, validates dates and numeric values, matches records by normalized IPO name, and then applies the Mainboard + closing-today filter using the configured timezone. Missing values remain null; the report displays them as Not available. GMP is unofficial and may change; verify figures against exchange disclosures before making investment decisions.
+```text
+https://integrate.api.nvidia.com/v1/chat/completions
+```
 
-## NVIDIA AI configuration
+NVIDIA receives readable text from the fetched IPOWatch pages and returns structured JSON. For each IPO, it must provide `record_evidence`, a complete source-row excerpt. Go checks that the excerpt belongs to the IPO and that extracted category, date and numeric values are supported by that row. There is no deterministic HTML table-parser fallback.
 
-Add these GitHub Actions settings:
+Subscription-page fields are IPO name, category, opening/closing dates, Retail, QIB, total and sNII/bNII only when separately published. The detail-page lookup is used for missing sNII/bNII; combined NII is never substituted.
 
-- Secret: NVIDIA_API_KEY
-- Variable: NVIDIA_MODEL (optional; defaults to nvidia/nemotron-3.5-lightning-30b-a3b)
+## No-active-IPO days and errors
 
-The NVIDIA endpoint is https://integrate.api.nvidia.com/v1/chat/completions. AI extraction is the primary extraction path and is required for the scheduled workflow; there is no deterministic table-parser fallback.
+If NVIDIA returns an empty `ipos` list for the subscription or GMP listing page, the application treats it as an empty dataset. When the subscription list is empty or no Mainboard IPO closes today, it skips the email and exits successfully.
 
-Use Actions > IPO closing alerts > Run workflow with dry_run enabled to fetch and extract data without sending an email. The workflow also runs go test ./... before the report job.
-
-
-## No-active-IPO days
-
-An empty `ipos` array from NVIDIA on the subscription or GMP listing page is treated as a valid no-current-record result. The scheduled job logs the condition, skips the report email, and exits successfully. Network failures, NVIDIA API failures, malformed JSON, and invalid non-empty IPO records still fail visibly.
+Actual page-fetch/network failures, NVIDIA HTTP/API failures, malformed JSON and invalid non-empty IPO records remain errors and cause the run to fail visibly.
