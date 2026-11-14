@@ -23,7 +23,7 @@ import (
 
 const (
  gmpURL = "https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/"
- subscriptionURL = "https://ipowatch.in/ipo-subscription-status-today/"
+ subscriptionURL = "https://ipowatch.in/subscription/"
  defaultTimezone = "Asia/Kolkata"
  defaultNVIDIAModel = "nvidia/nemotron-3.5-lightning-30b-a3b"
 )
@@ -39,6 +39,7 @@ var (
  numberRE = regexp.MustCompile("-?[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?")
 	multipleRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*x\\b")
 	percentValueRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*%")
+	dateTokenRE = regexp.MustCompile("(?i)\\b(?:[0-9]{1,2}\\s+[A-Za-z]{3,9},?\\s+[0-9]{4}|[A-Za-z]{3,9}\\s+[0-9]{1,2},?\\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{4})\\b")
 )
 
 type IPO struct {
@@ -70,6 +71,7 @@ type ExtractedIPO struct {
  Total *float64
  GMP *float64
  GMPPercent *float64
+ RecordEvidence string
  Evidence map[string]string
 }
 
@@ -103,6 +105,9 @@ func (item *ExtractedIPO) UnmarshalJSON(data []byte) error {
   "gmp_percentage": &item.GMPPercent,
  } {
   if err := readNumber(key, target); err != nil { return err }
+ }
+ if raw, ok := fields["record_evidence"]; ok && string(raw) != "null" {
+  if err := json.Unmarshal(raw, &item.RecordEvidence); err != nil { return fmt.Errorf("decode record_evidence: %w", err) }
  }
  if raw, ok := fields["evidence"]; ok {
   if err := json.Unmarshal(raw, &item.Evidence); err != nil { return fmt.Errorf("decode evidence: %w", err) }
@@ -279,57 +284,178 @@ func buildExtractionPrompt(sourceType, requestedIPO, sourceURL, pageText string)
 	scope := "Extract all IPOs explicitly listed on this page."
 	switch sourceType {
 	case "subscription":
-		scope = "Extract every IPO on this subscription page: IPO name, category (Mainboard or SME), opening date, closing date, Retail, sNII, bNII, QIB and total subscription multiples where present."
+		scope = "Extract every current IPO row on this subscription page: IPO name, category (Mainboard or SME), closing date, QIB, Retail and Total subscription values. The page may show a combined NII column; do not copy that value into sNII or bNII. Return sNII and bNII only when they are explicitly separate columns/values on this page."
 	case "gmp":
-		scope = "Extract every IPO on this GMP page: IPO name, category when explicitly stated, GMP in rupees and GMP percentage where present."
+		scope = "Extract every IPO on this GMP page: IPO name, GMP in rupees and GMP percentage where present."
 	case "ipo_detail":
-		scope = "Extract subscription values for the requested IPO only. Return Retail, sNII, bNII, QIB and total subscription multiples where present."
+		scope = "Extract subscription values for the requested IPO only: Retail, sNII, bNII, QIB and total where explicitly present."
 	}
-	return fmt.Sprintf("Extract Indian IPO information from this website page.\nSOURCE TYPE: %s\nSOURCE URL: %s\nREQUESTED IPO: %s\nTASK: %s\n\nRULES:\n1. Use only information visibly present in source text. Do not use model knowledge, estimates or other websites.\n2. Never guess missing values. Use JSON null for missing numbers and empty string for missing dates/category.\n3. Keep sNII and bNII separate. Never copy total NII into either field.\n4. Subscription values are numeric multiples, not percentages or application counts.\n5. GMP is absolute rupees; GMP percentage is separate.\n6. Normalize dates to YYYY-MM-DD. If ambiguous, use empty string.\n7. Category must be Mainboard or SME only when explicitly stated.\n8. Do not confuse issue price, lot size or listing date with subscription values.\n9. For every non-null number and every non-empty name/category/date, supply a verbatim evidence quote in evidence. A quote may be just the relevant cell text (for example Mainboard or 3.42x), but it must occur in the same visible table row or local record block as that IPO name. Do not reuse another IPO's row evidence.\n10. Do not combine fields from different IPOs. Ignore ads, navigation, related articles and stale historical examples.\n11. Return only JSON matching this shape: {\"ipos\":[{\"name\":\"Company IPO\",\"category\":\"Mainboard\",\"opening_date\":\"YYYY-MM-DD\",\"closing_date\":\"YYYY-MM-DD\",\"retail_subscription\":3.42,\"snii_subscription\":8.15,\"bnii_subscription\":11.2,\"qib_subscription\":5.6,\"total_subscription\":6.75,\"gmp\":25,\"gmp_percentage\":12.5,\"evidence\":{\"name\":\"source quote\",\"category\":\"source quote\",\"opening_date\":\"source quote\",\"closing_date\":\"source quote\",\"retail_subscription\":\"source quote\",\"snii_subscription\":\"source quote\",\"bnii_subscription\":\"source quote\",\"qib_subscription\":\"source quote\",\"total_subscription\":\"source quote\",\"gmp\":\"source quote\",\"gmp_percentage\":\"source quote\"}}]}. Omit evidence keys for null/empty fields. If none, return {\"ipos\":[]}.\n\nSOURCE TEXT:\n%s", sourceType, sourceURL, requestedIPO, scope, pageText)
+	lines := []string{
+		"Extract Indian IPO information from the supplied website text.",
+		fmt.Sprintf("SOURCE TYPE: %s", sourceType),
+		fmt.Sprintf("SOURCE URL: %s", sourceURL),
+		fmt.Sprintf("REQUESTED IPO: %s", requestedIPO),
+		fmt.Sprintf("TASK: %s", scope),
+		"",
+		"Rules:",
+		"1. Use only supplied page text. Never use model knowledge, estimates, memory or other websites.",
+		"2. Return one object per current IPO data row. Ignore navigation, unrelated links, advertisements and stale cards.",
+		"3. record_evidence must be the COMPLETE exact source row containing the IPO name and its values. Copy it verbatim as one contiguous substring from the supplied text.",
+		"4. Category is Mainboard or SME only when explicitly shown. Category evidence does not need to repeat the company name.",
+		"5. For subscription pages, closing_date is required and must come from that IPO's row. If not shown, use an empty string; do not invent it. Opening date is optional.",
+		"6. Subscription values are multiples: 3.42 means 3.42x, not a percentage or application count.",
+		"7. Keep QIB, NII, Retail and Total in their correct source columns; do not shift values.",
+		"8. The combined NII column is NOT sNII. Set sNII and bNII to null unless each is independently present.",
+		"9. GMP is an absolute rupee amount. GMP percentage is a separate field.",
+		"10. Missing numeric values must be JSON null, never zero.",
+		"11. Every non-null number must appear in record_evidence. Do not combine values from different IPO rows.",
+		"12. Return only JSON in this shape: {\"ipos\":[{\"name\":\"IPO name\",\"category\":\"Mainboard\",\"opening_date\":\"YYYY-MM-DD\",\"closing_date\":\"YYYY-MM-DD\",\"retail_subscription\":3.42,\"snii_subscription\":null,\"bnii_subscription\":null,\"qib_subscription\":5.6,\"total_subscription\":4.2,\"gmp\":25,\"gmp_percentage\":12.5,\"record_evidence\":\"exact full source row\"}]}. If no current IPO rows exist, return {\"ipos\":[]}.",
+		"",
+		"SOURCE TEXT:",
+		pageText,
+	}
+	return strings.Join(lines, "\n")
 }
 
 func validateExtractedIPO(item ExtractedIPO, sourceText, sourceType string) error {
-	if strings.TrimSpace(item.Name) == "" { return fmt.Errorf("missing IPO name") }
-	if !strings.Contains(normalizeName(sourceText), normalizeName(item.Name)) { return fmt.Errorf("IPO name %q does not appear in source", item.Name) }
-	if err := validateEvidence(item, "name", item.Name, sourceText, false, nil); err != nil { return err }
+	if strings.TrimSpace(item.Name) == "" {
+		return fmt.Errorf("missing IPO name")
+	}
+
+	record, err := findIPORecordEvidence(item.Name, item.RecordEvidence, sourceText)
+	if err != nil {
+		return err
+	}
+
 	if sourceType == "subscription" {
 		category := strings.ToLower(strings.TrimSpace(item.Category))
-		if category != "mainboard" && category != "sme" { return fmt.Errorf("unsupported or missing IPO category %q", item.Category) }
-		if err := validateEvidence(item, "category", item.Category, sourceText, false, nil); err != nil { return err }
-		if item.ClosingDate == "" { return fmt.Errorf("missing IPO closing date") }
-		if _, err := time.Parse("2006-01-02", item.ClosingDate); err != nil { return fmt.Errorf("invalid closing date %q; expected YYYY-MM-DD", item.ClosingDate) }
-		if err := validateEvidence(item, "closing_date", "", sourceText, false, nil); err != nil { return err }
+		if category != "mainboard" && category != "sme" {
+			return fmt.Errorf("unsupported or missing IPO category %q", item.Category)
+		}
+		if !strings.Contains(normalizeName(record), normalizeName(item.Category)) {
+			return fmt.Errorf("category %q is not present in %q source row for %s", item.Category, item.Name, truncate(record, 180))
+		}
+		if item.ClosingDate == "" {
+			return fmt.Errorf("missing IPO closing date")
+		}
+		if _, err := time.Parse("2006-01-02", item.ClosingDate); err != nil {
+			return fmt.Errorf("invalid closing date %q; expected YYYY-MM-DD", item.ClosingDate)
+		}
+		if !dateAppearsInEvidence(item.ClosingDate, record) {
+			return fmt.Errorf("closing date %s is not present in IPO row %q", item.ClosingDate, truncate(record, 180))
+		}
 		if item.OpeningDate != "" {
-			if _, err := time.Parse("2006-01-02", item.OpeningDate); err != nil { return fmt.Errorf("invalid opening date %q; expected YYYY-MM-DD", item.OpeningDate) }
-			if err := validateEvidence(item, "opening_date", "", sourceText, false, nil); err != nil { return err }
+			if _, err := time.Parse("2006-01-02", item.OpeningDate); err != nil {
+				return fmt.Errorf("invalid opening date %q; expected YYYY-MM-DD", item.OpeningDate)
+			}
+			if !dateAppearsInEvidence(item.OpeningDate, record) {
+				return fmt.Errorf("opening date %s is not present in IPO row", item.OpeningDate)
+			}
 		}
 	}
-	fields := []struct { key string; value *float64 }{
-		{"retail_subscription", item.Retail}, {"snii_subscription", item.SmallNII},
-		{"bnii_subscription", item.BigNII}, {"qib_subscription", item.QIB},
-		{"total_subscription", item.Total}, {"gmp", item.GMP}, {"gmp_percentage", item.GMPPercent},
+
+	fields := []struct {
+		key string
+		value *float64
+	}{
+		{"retail_subscription", item.Retail},
+		{"snii_subscription", item.SmallNII},
+		{"bnii_subscription", item.BigNII},
+		{"qib_subscription", item.QIB},
+		{"total_subscription", item.Total},
+		{"gmp", item.GMP},
+		{"gmp_percentage", item.GMPPercent},
 	}
 	for _, field := range fields {
-		if field.value == nil { continue }
-		if field.key != "gmp" && field.key != "gmp_percentage" && *field.value < 0 { return fmt.Errorf("%s cannot be negative", field.key) }
-		if err := validateEvidence(item, field.key, "", sourceText, true, field.value); err != nil { return err }
+		if field.value == nil {
+			continue
+		}
+		if field.key != "gmp" && field.key != "gmp_percentage" && *field.value < 0 {
+			return fmt.Errorf("%s cannot be negative", field.key)
+		}
+		if !evidenceHasNumber(record, *field.value) {
+			return fmt.Errorf("evidence for %s value %v is not present in IPO row %q", field.key, *field.value, truncate(record, 180))
+		}
+		// If the row explicitly labels subscription columns, also verify that
+		// the extracted multiple follows its own label (especially sNII/bNII).
+		if sourceRowHasMetricLabel(field.key, record) &&
+			field.key != "gmp" && field.key != "gmp_percentage" &&
+			!evidenceFieldHasValue(field.key, record, *field.value) {
+			return fmt.Errorf("evidence for %s does not match its labelled value in the IPO row", field.key)
+		}
 	}
 	return nil
 }
 
-func validateEvidence(item ExtractedIPO, key, expectedText, sourceText string, checkNumber bool, expectedNumber *float64) error {
-	quote := strings.TrimSpace(item.Evidence[key])
-	if quote == "" { return fmt.Errorf("missing evidence for %s", key) }
-	if !strings.Contains(normalizeEvidence(sourceText), normalizeEvidence(quote)) { return fmt.Errorf("evidence for %s is not present in source text", key) }
-	if !evidenceBelongsToIPO(item.Name, quote, sourceText) { return fmt.Errorf("evidence for %s is not associated with IPO %q in the same source row", key, item.Name) }
-	if expectedText != "" && !strings.Contains(normalizeName(quote), normalizeName(expectedText)) { return fmt.Errorf("evidence for %s does not support %q", key, expectedText) }
-	if checkNumber && expectedNumber != nil && (!evidenceHasNumber(quote, *expectedNumber) || !evidenceFieldHasValue(key, quote, *expectedNumber)) { return fmt.Errorf("evidence for %s does not show extracted value %v beside its field label", key, *expectedNumber) }
-	return nil
+// findIPORecordEvidence prefers the model-provided exact row quote. If the model
+// omits it, it falls back to the line containing the IPO name in htmlToText output.
+// Since htmlToText preserves </tr> boundaries, this is record-level verification,
+// not a DOM parser or fixed-column scraper.
+func findIPORecordEvidence(ipoName, quotedRow, sourceText string) (string, error) {
+	name := normalizeName(ipoName)
+	if name == "" {
+		return "", fmt.Errorf("empty normalized IPO name")
+	}
+
+	if strings.TrimSpace(quotedRow) != "" {
+		quoted := normalizeEvidence(quotedRow)
+		for _, row := range strings.Split(sourceText, "\n") {
+			if strings.Contains(normalizeEvidence(row), quoted) &&
+				strings.Contains(normalizeName(row), name) {
+				return strings.TrimSpace(row), nil
+			}
+		}
+		return "", fmt.Errorf("record_evidence for %q is not an exact source-row quote", ipoName)
+	}
+
+	var matches []string
+	for _, row := range strings.Split(sourceText, "\n") {
+		if strings.Contains(normalizeName(row), name) {
+			matches = append(matches, strings.TrimSpace(row))
+		}
+	}
+	if len(matches) == 1 && len(matches[0]) > 0 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		// Prefer a row carrying a closing-date-shaped token and category marker.
+		for _, row := range matches {
+			lower := strings.ToLower(row)
+			if (strings.Contains(lower, "mainboard") || strings.Contains(lower, "sme")) &&
+				len(dateTokenRE.FindString(row)) > 0 {
+				return row, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("could not identify one unambiguous source row for IPO %q", ipoName)
 }
 
-// evidenceBelongsToIPO accepts a short cell-level quote (for example "Mainboard")
-// only when that quote occurs on the exact same visible source row as the IPO name.
-// htmlToText preserves table-row boundaries so values from adjacent IPOs cannot mix.
+func dateAppearsInEvidence(isoDate, evidence string) bool {
+	expected, err := time.Parse("2006-01-02", isoDate)
+	if err != nil {
+		return false
+	}
+	layouts := []string{
+		"2 January 2006", "02 January 2006",
+		"January 2, 2006", "January 02, 2006",
+		"2 Jan 2006", "02 Jan 2006",
+		"Jan 2, 2006", "Jan 02, 2006",
+		"2006-01-02", "02/01/2006", "2/1/2006",
+		"02-01-2006", "2-1-2006",
+	}
+	for _, token := range dateTokenRE.FindAllString(evidence, -1) {
+		for _, layout := range layouts {
+			parsed, parseErr := time.Parse(layout, token)
+			if parseErr == nil && parsed.Year() == expected.Year() &&
+				parsed.Month() == expected.Month() && parsed.Day() == expected.Day() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+
 func evidenceBelongsToIPO(ipoName, evidence, sourceText string) bool {
 	name := normalizeName(ipoName)
 	quote := normalizeEvidence(evidence)
@@ -345,6 +471,23 @@ func evidenceBelongsToIPO(ipoName, evidence, sourceText string) bool {
 	return false
 }
 
+func sourceRowHasMetricLabel(key, row string) bool {
+	lower := strings.ToLower(row)
+	switch key {
+	case "retail_subscription":
+		return strings.Contains(lower, "retail") || strings.Contains(lower, "rii")
+	case "snii_subscription":
+		return strings.Contains(lower, "snii") || strings.Contains(lower, "small nii")
+	case "bnii_subscription":
+		return strings.Contains(lower, "bnii") || strings.Contains(lower, "big nii")
+	case "qib_subscription":
+		return strings.Contains(lower, "qib")
+	case "total_subscription":
+		return strings.Contains(lower, "total")
+	default:
+		return false
+	}
+}
 func evidenceHasNumber(evidence string, expected float64) bool {
 	for _, match := range numberRE.FindAllString(evidence, -1) {
 		candidate, err := strconv.ParseFloat(strings.ReplaceAll(match, ",", ""), 64)
@@ -455,9 +598,11 @@ func ipoDetailsURL(name string) string {
 			if separatorPending && slug.Len() > 0 { slug.WriteByte('-') }
 			slug.WriteRune(character)
 			separatorPending = false
-		} else if unicode.IsSpace(character) || character == '-' { separatorPending = true }
+		} else {
+			separatorPending = true
+		}
 	}
-	return "https://ipowatch.live/" + slug.String() + "-ipo-details/"
+	return "https://ipowatch.in/" + slug.String() + "-ipo-subscription-status/"
 }
 
 func sameDate(left, right time.Time) bool { return left.Year() == right.Year() && left.Month() == right.Month() && left.Day() == right.Day() }

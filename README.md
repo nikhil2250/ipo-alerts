@@ -56,9 +56,9 @@ Optionally add repository Actions variables `SMTP_HOST` and `SMTP_PORT`; they de
 
 ## Data extraction
 
-The application fetches the IPOWatch subscription and GMP pages, converts visible page markup into plain text, and sends that text to NVIDIA NIM for structured IPO extraction. It does not use HTML DOM parsing, table parsing, or fixed column positions.
+The application fetches the IPOWatch's current subscription page (/subscription/) and GMP page, converts visible page markup into plain text, and sends that text to NVIDIA NIM for structured IPO extraction. It does not use HTML DOM parsing, table parsing, or fixed column positions.
 
-The subscription page is the source for IPO name, category, opening/closing dates, Retail, sNII, bNII, QIB and total subscription wherever those values are published. The GMP page enriches matching IPO records with GMP and GMP percentage. For closing-today Mainboard IPOs with missing sNII or bNII, the application fetches the IPO detail page and asks NVIDIA to extract the missing fields.
+The subscription page is the source for IPO name, category, opening/closing dates, Retail, sNII, bNII, QIB and total subscription wherever those values are published. The GMP page enriches matching IPO records with GMP and GMP percentage. For closing-today Mainboard IPOs with missing sNII or bNII, the application fetches the IPO-specific subscription-detail page and asks NVIDIA to extract the missing fields.
 
 The model must return source evidence for each extracted field. Go checks that evidence is present in the fetched page text, validates dates and numeric values, matches records by normalized IPO name, and then applies the Mainboard + closing-today filter using the configured timezone. Missing values remain null; the report displays them as Not available. GMP is unofficial and may change; verify figures against exchange disclosures before making investment decisions.
 

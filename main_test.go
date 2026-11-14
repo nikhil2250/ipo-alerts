@@ -41,6 +41,7 @@ func validSubscriptionIPO() (ExtractedIPO, string) {
 	item := ExtractedIPO{
 		Name: "Apex Technologies IPO",
 		Category: "Mainboard",
+		RecordEvidence: row,
 		OpeningDate: "2026-11-12",
 		ClosingDate: "2026-11-14",
 		Retail: floatPtr(3.42),
@@ -102,6 +103,36 @@ func TestEvidenceBelongsToIPORejectsNeighbouringIPOValue(t *testing.T) {
 	source := "Crystal Crop Protection Mainboard 14 November 2026\nWatrana Rentals SME 15 November 2026"
 	if evidenceBelongsToIPO("Crystal Crop Protection", "SME", source) {
 		t.Fatal("category from neighbouring IPO row must not be accepted")
+	}
+}
+
+
+func TestFindIPORecordEvidenceUsesExactSourceRow(t *testing.T) {
+	source := "Crystal Crop Protection Mainboard closing 14 November 2026 Retail 3.42x\nWatrana Rentals SME closing 15 November 2026 Retail 2.10x"
+	row, err := findIPORecordEvidence("Crystal Crop Protection", "Crystal Crop Protection Mainboard closing 14 November 2026 Retail 3.42x", source)
+	if err != nil { t.Fatalf("findIPORecordEvidence: %v", err) }
+	if strings.Contains(row, "Watrana Rentals") { t.Fatalf("matched neighbouring IPO row: %q", row) }
+	if _, err := findIPORecordEvidence("Crystal Crop Protection", "Watrana Rentals SME closing 15 November 2026", source); err == nil {
+		t.Fatal("should reject evidence copied from another IPO row")
+	}
+}
+
+func TestDateAppearsInEvidence(t *testing.T) {
+	for _, evidence := range []string{"Closing 14 November 2026", "Closing November 14, 2026", "Closing 2026-11-14", "Closing 14/11/2026"} {
+		if !dateAppearsInEvidence("2026-11-14", evidence) {
+			t.Errorf("date not recognized in evidence %q", evidence)
+		}
+	}
+	if dateAppearsInEvidence("2026-11-14", "Opening 13 November 2026") {
+		t.Fatal("should reject a different date")
+	}
+}
+
+func TestValidateExtractedIPORejectsWrongRecordEvidence(t *testing.T) {
+	item, source := validSubscriptionIPO()
+	item.RecordEvidence = "Watrana Rentals SME closing 15 November 2026"
+	if err := validateExtractedIPO(item, source, "subscription"); err == nil {
+		t.Fatal("expected foreign record evidence to be rejected")
 	}
 }
 
@@ -193,7 +224,7 @@ func TestParseRecipients(t *testing.T) {
 }
 
 func TestIPODetailsURL(t *testing.T) {
-	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.live/mksons-fine-jewels-ipo-details/" { t.Fatalf("detail URL = %q", got) }
+	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.in/m-k-sons-fine-jewels-ipo-subscription-status/" { t.Fatalf("detail URL = %q", got) }
 }
 
 func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
@@ -205,7 +236,7 @@ func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
 	item, source := validSubscriptionIPO()
 	responseJSON, err := json.Marshal(map[string]any{
 		"ipos": []any{map[string]any{
-			"name": item.Name, "category": item.Category, "opening_date": item.OpeningDate,
+			"name": item.Name, "category": item.Category, "opening_date": item.OpeningDate, "record_evidence": item.RecordEvidence,
 			"closing_date": item.ClosingDate, "retail_subscription": item.Retail,
 			"snii_subscription": item.SmallNII, "bnii_subscription": item.BigNII,
 			"qib_subscription": item.QIB, "total_subscription": item.Total,
