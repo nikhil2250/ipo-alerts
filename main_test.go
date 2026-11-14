@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -117,5 +122,72 @@ func TestSelectClosingToday(t *testing.T) {
 func TestNormalizeNameIgnoresPunctuationAndCase(t *testing.T) {
 	if normalizeName("M.K. Sons Fine Jewels") != normalizeName("m k sons fine-jewels") {
 		t.Fatal("equivalent IPO names should normalize to the same key")
+	}
+}
+
+
+func TestExtractSmallNIIWithAIValidatesEvidence(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "test-model")
+
+	originalURL := openAIChatCompletionsURL
+	defer func() { openAIChatCompletionsURL = originalURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Errorf("authorization = %q", got)
+		}
+		var request aiChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if request.Model != "test-model" {
+			t.Errorf("model = %q, want test-model", request.Model)
+		}
+		response := aiChatResponse{}
+		response.Choices = append(response.Choices, struct {
+			Message aiChatMessage `json:"message"`
+		}{Message: aiChatMessage{
+			Role: "assistant",
+			Content: `{"ipo_name":"Test IPO","snii_subscription":11.71,"evidence":"sNII < ₹10L 11.71x"}`,
+		}})
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+	openAIChatCompletionsURL = server.URL
+
+	page := []byte(`<table><tr><td>sNII &lt; ₹10L</td><td>11.71x</td></tr></table>`)
+	got, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
+	if err != nil {
+		t.Fatalf("extractSmallNIIWithAI returned error: %v", err)
+	}
+	if got != "11.71x" {
+		t.Fatalf("sNII = %q, want 11.71x", got)
+	}
+}
+
+func TestExtractSmallNIIWithAIRejectsEvidenceNotInPage(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "test-model")
+
+	originalURL := openAIChatCompletionsURL
+	defer func() { openAIChatCompletionsURL = originalURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"{\"ipo_name\":\"Test IPO\",\"snii_subscription\":11.71,\"evidence\":\"sNII 11.71x\"}"}}]}`)
+	}))
+	defer server.Close()
+	openAIChatCompletionsURL = server.URL
+
+	page := []byte(`<table><tr><td>Retail</td><td>11.71x</td></tr></table>`)
+	_, err := extractSmallNIIWithAI(context.Background(), "Test IPO", "https://example.com/ipo-details", page)
+	if err == nil || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("expected evidence validation error, got %v", err)
 	}
 }
