@@ -598,7 +598,9 @@ func ipoDetailsURL(name string) string {
 			if separatorPending && slug.Len() > 0 { slug.WriteByte('-') }
 			slug.WriteRune(character)
 			separatorPending = false
-		} else if unicode.IsSpace(character) || character == '-' { separatorPending = true }
+		} else {
+			separatorPending = true
+		}
 	}
 	return "https://ipowatch.in/" + slug.String() + "-ipo-subscription-status/"
 }
