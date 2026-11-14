@@ -18,7 +18,7 @@ permissions:
 jobs:
   send-alert:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -30,7 +30,6 @@ jobs:
         env:
           TIMEZONE: Asia/Kolkata
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
-          AI_EXTRACTION_ENABLED: ${{ vars.AI_EXTRACTION_ENABLED || 'false' }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-lightning-30b-a3b' }}
           SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
