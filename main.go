@@ -135,7 +135,10 @@ func run() error {
 	if err != nil { return fmt.Errorf("fetch IPO subscription page: %w", err) }
 	subscriptionRows, err := extractIPOsWithAI(ctx, "subscription", "", subscriptionURL, subscriptionPage)
 	if err != nil { return fmt.Errorf("NVIDIA extraction from subscription page: %w", err) }
-	if len(subscriptionRows) == 0 { return fmt.Errorf("NVIDIA returned no IPO records from subscription page") }
+	if len(subscriptionRows) == 0 {
+		log.Printf("NVIDIA found no current IPO rows; skipping report for %s", today.Format("2006-01-02"))
+		return sendReport(nil, today)
+	}
 	subscriptions, err := convertSubscriptionRows(subscriptionRows, location)
 	if err != nil { return fmt.Errorf("convert subscription extraction: %w", err) }
 	log.Printf("NVIDIA extracted %d IPO records from subscription page", len(subscriptions))
@@ -262,7 +265,13 @@ func extractIPOsWithAI(ctx context.Context, sourceType, requestedIPO, sourceURL 
 	if err := json.Unmarshal([]byte(content), &extracted); err != nil {
 		return nil, fmt.Errorf("decode NVIDIA IPO JSON: %w; response prefix: %q", err, truncate(content, 300))
 	}
-	if len(extracted.IPOs) == 0 { return nil, fmt.Errorf("NVIDIA returned an empty IPO list for %s page", sourceType) }
+		if len(extracted.IPOs) == 0 {
+		if sourceType == "subscription" || sourceType == "gmp" {
+			log.Printf("NVIDIA found no current IPO rows on %s source %s", sourceType, sourceURL)
+			return []ExtractedIPO{}, nil
+		}
+		return nil, fmt.Errorf("NVIDIA returned an empty IPO list for %s page", sourceType)
+	}
 
 	validated := make([]ExtractedIPO, 0, len(extracted.IPOs))
 	for _, item := range extracted.IPOs {
