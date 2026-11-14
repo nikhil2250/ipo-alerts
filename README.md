@@ -12,7 +12,7 @@ The report includes Retail, sNII, bNII, QIB and total subscription multiples whe
 4. Validate each result against its complete source-row evidence (`record_evidence`), including category, closing date and any extracted numeric values.
 5. Keep only Mainboard IPOs whose closing date is today in the configured timezone.
 6. Enrich matching IPOs with GMP from https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/.
-7. When sNII or bNII is missing, fetch the IPO-specific subscription-detail page and ask NVIDIA to extract those fields if they are explicitly shown.
+7. When any subscription metric is unavailable, fetch the IPO-specific subscription-detail page and ask NVIDIA to extract the subscription metrics shown there; returned values are used to enrich the IPO record.
 8. Send the report using SMTP, unless there are no qualifying IPOs or DRY_RUN is enabled.
 
 **Important data rules:** A combined NII value is not treated as sNII or bNII. Missing values remain unavailable; the model must not estimate or invent them. GMP is unofficial and may change, so verify it independently before making investment decisions.
@@ -89,7 +89,7 @@ https://integrate.api.nvidia.com/v1/chat/completions
 
 NVIDIA receives readable text from the fetched IPOWatch pages and returns structured JSON. For each IPO, it must provide `record_evidence`, a complete source-row excerpt. Go checks that the excerpt belongs to the IPO and that extracted category, date and numeric values are supported by that row. There is no deterministic HTML table-parser fallback.
 
-Subscription-page fields are IPO name, category, opening/closing dates, Retail, QIB, total and sNII/bNII only when separately published. The detail-page lookup is used for missing sNII/bNII; combined NII is never substituted.
+Subscription-page fields are IPO name, category, opening/closing dates, Retail, QIB, total and sNII/bNII only when separately published. The detail-page lookup is triggered when any subscription metric is unavailable; values explicitly returned from that page can enrich the record. Combined NII is never substituted for sNII or bNII.
 
 ## No-active-IPO days and errors
 
