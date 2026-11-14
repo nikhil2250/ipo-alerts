@@ -374,7 +374,14 @@ func validateExtractedIPO(item ExtractedIPO, sourceText, sourceType string) erro
 			return fmt.Errorf("%s cannot be negative", field.key)
 		}
 		if !evidenceHasNumber(record, *field.value) {
-			return fmt.Errorf("%s value %v is not present in IPO row %q", field.key, *field.value, truncate(record, 180))
+			return fmt.Errorf("evidence for %s value %v is not present in IPO row %q", field.key, *field.value, truncate(record, 180))
+		}
+		// If the row explicitly labels subscription columns, also verify that
+		// the extracted multiple follows its own label (especially sNII/bNII).
+		if sourceRowHasMetricLabel(field.key, record) &&
+			field.key != "gmp" && field.key != "gmp_percentage" &&
+			!evidenceFieldHasValue(field.key, record, *field.value) {
+			return fmt.Errorf("evidence for %s does not match its labelled value in the IPO row", field.key)
 		}
 	}
 	return nil
@@ -464,6 +471,23 @@ func evidenceBelongsToIPO(ipoName, evidence, sourceText string) bool {
 	return false
 }
 
+func sourceRowHasMetricLabel(key, row string) bool {
+	lower := strings.ToLower(row)
+	switch key {
+	case "retail_subscription":
+		return strings.Contains(lower, "retail") || strings.Contains(lower, "rii")
+	case "snii_subscription":
+		return strings.Contains(lower, "snii") || strings.Contains(lower, "small nii")
+	case "bnii_subscription":
+		return strings.Contains(lower, "bnii") || strings.Contains(lower, "big nii")
+	case "qib_subscription":
+		return strings.Contains(lower, "qib")
+	case "total_subscription":
+		return strings.Contains(lower, "total")
+	default:
+		return false
+	}
+}
 func evidenceHasNumber(evidence string, expected float64) bool {
 	for _, match := range numberRE.FindAllString(evidence, -1) {
 		candidate, err := strconv.ParseFloat(strings.ReplaceAll(match, ",", ""), 64)
