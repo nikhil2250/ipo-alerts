@@ -328,26 +328,17 @@ func validateEvidence(item ExtractedIPO, key, expectedText, sourceText string, c
 }
 
 // evidenceBelongsToIPO accepts a short cell-level quote (for example "Mainboard")
-// only when that quote occurs in the same visible source row as the IPO name.
+// only when that quote occurs on the exact same visible source row as the IPO name.
+// htmlToText preserves table-row boundaries so values from adjacent IPOs cannot mix.
 func evidenceBelongsToIPO(ipoName, evidence, sourceText string) bool {
 	name := normalizeName(ipoName)
 	quote := normalizeEvidence(evidence)
 	if name == "" || quote == "" {
 		return false
 	}
-	rows := strings.Split(sourceText, "\n")
-	for _, row := range rows {
+	for _, row := range strings.Split(sourceText, "\n") {
 		if strings.Contains(normalizeName(row), name) &&
 			strings.Contains(normalizeEvidence(row), quote) {
-			return true
-		}
-	}
-	// A few pages render one record across adjacent block lines. Allow a local
-	// two-line window, never an arbitrary match elsewhere on the page.
-	for i := 0; i+1 < len(rows); i++ {
-		window := rows[i] + " " + rows[i+1]
-		if strings.Contains(normalizeName(window), name) &&
-			strings.Contains(normalizeEvidence(window), quote) {
 			return true
 		}
 	}
