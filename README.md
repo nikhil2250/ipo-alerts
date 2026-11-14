@@ -61,16 +61,21 @@ Each run selects all Mainboard IPOs whose closing date is today in `TIMEZONE`, r
 
 ## Optional AI-assisted sNII fallback
 
-The normal IPOWatch parser remains the primary extraction method. When it cannot find an explicit sNII multiple on an IPO detail page, the application can optionally ask an AI model to interpret the visible page text. AI never replaces an already parsed value.
+The normal IPOWatch parser remains the primary extraction method. When it cannot find an explicit sNII multiple on an IPO detail page, the application can optionally ask an NVIDIA-hosted AI model to interpret the visible page text. AI never replaces an already parsed value.
 
 To enable the fallback, add these GitHub Actions settings:
 
 - Repository variable `AI_EXTRACTION_ENABLED=true`
-- Repository secret `OPENAI_API_KEY`
-- Repository variable `OPENAI_MODEL=gpt-4.1-mini` (or another model available to your API key that supports Chat Completions JSON mode)
+- Repository secret `NVIDIA_API_KEY`
+- Repository variable `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b` (or another model available to your API key that supports NVIDIA NIM chat completions and JSON mode)
 
 When AI extraction is disabled, the application behaves as before. If AI is enabled but the API request fails, the IPO report shows `Not available` for sNII rather than inventing a value.
 
 The fallback checks that the model returns the requested IPO name, a numeric non-negative multiple, and a verbatim evidence phrase present in the fetched page text that identifies sNII. These checks reduce extraction errors but do not guarantee that the source itself is correct. Review source data before making investment decisions.
 
 AI is currently used only for sNII detail-page fallback. Retail, GMP, IPO discovery, Mainboard filtering, closing-date filtering, and email generation continue to use the existing deterministic Go logic. GMP remains unofficial.
+
+
+The AI client uses NVIDIA's OpenAI-compatible NIM endpoint:
+`https://integrate.api.nvidia.com/v1/chat/completions`.
+The endpoint and model are configurable in the source and workflow settings. Create an API key in the NVIDIA API Catalog / Build playground and store it only as a GitHub Actions secret.
