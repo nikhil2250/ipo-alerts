@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -81,23 +83,25 @@ func run() error {
 			closingIPOs[index].SmallNIISubscription = "Not available"
 			continue
 		}
-		closingIPOs[index].SmallNIISubscription, err = parseSmallNIISubscription(detailHTML)
-		if err != nil {
-			log.Printf("parse sNII subscription for %s: %v", closingIPOs[index].Name, err)
-			if strings.EqualFold(os.Getenv("AI_EXTRACTION_ENABLED"), "true") {
-				ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
-				aiValue, aiErr := extractSmallNIIWithAI(ctx, closingIPOs[index].Name, detailURL, detailHTML)
-				cancel()
-				if aiErr == nil {
-					closingIPOs[index].SmallNIISubscription = aiValue
-					log.Printf("AI fallback extracted sNII for %s: %s", closingIPOs[index].Name, aiValue)
-				} else {
-					log.Printf("AI fallback failed for %s: %v", closingIPOs[index].Name, aiErr)
-					closingIPOs[index].SmallNIISubscription = "Not available"
-				}
+		parsedSNII, parseErr := parseSmallNIISubscription(detailHTML)
+		closingIPOs[index].SmallNIISubscription = parsedSNII
+		needsAIFallback := parseErr != nil || strings.EqualFold(strings.TrimSpace(parsedSNII), "Not available")
+		if parseErr != nil {
+			log.Printf("parse sNII subscription for %s: %v", closingIPOs[index].Name, parseErr)
+		}
+		if needsAIFallback && strings.EqualFold(os.Getenv("AI_EXTRACTION_ENABLED"), "true") {
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+			aiValue, aiErr := extractSmallNIIWithAI(ctx, closingIPOs[index].Name, detailURL, detailHTML)
+			cancel()
+			if aiErr == nil {
+				closingIPOs[index].SmallNIISubscription = aiValue
+				log.Printf("AI fallback extracted sNII for %s: %s", closingIPOs[index].Name, aiValue)
 			} else {
+				log.Printf("AI fallback failed for %s: %v", closingIPOs[index].Name, aiErr)
 				closingIPOs[index].SmallNIISubscription = "Not available"
 			}
+		} else if needsAIFallback {
+			closingIPOs[index].SmallNIISubscription = "Not available"
 		}
 	}
 	message := buildEmail(closingIPOs, today)
