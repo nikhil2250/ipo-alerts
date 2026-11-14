@@ -72,3 +72,8 @@ Add these GitHub Actions settings:
 The NVIDIA endpoint is https://integrate.api.nvidia.com/v1/chat/completions. AI extraction is the primary extraction path and is required for the scheduled workflow; there is no deterministic table-parser fallback.
 
 Use Actions > IPO closing alerts > Run workflow with dry_run enabled to fetch and extract data without sending an email. The workflow also runs go test ./... before the report job.
+
+
+## No-active-IPO days
+
+An empty `ipos` array from NVIDIA on the subscription or GMP listing page is treated as a valid no-current-record result. The scheduled job logs the condition, skips the report email, and exits successfully. Network failures, NVIDIA API failures, malformed JSON, and invalid non-empty IPO records still fail visibly.
