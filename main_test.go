@@ -224,7 +224,7 @@ func TestParseRecipients(t *testing.T) {
 }
 
 func TestIPODetailsURL(t *testing.T) {
-	if got := ipoDetailsURL("M.K.Sons Fine Jewels"); got != "https://ipowatch.live/mksons-fine-jewels-ipo-details/" { t.Fatalf("detail URL = %q", got) }
+	if got := ipoDetailsURL("Apex Technologies"); got != "https://ipowatch.in/apex-technologies-ipo-subscription-status/" { t.Fatalf("detail URL = %q", got) }
 }
 
 func TestExtractIPOsWithAIMockedNVIDIA(t *testing.T) {
