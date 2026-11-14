@@ -39,6 +39,7 @@ var (
  numberRE = regexp.MustCompile("-?[0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?")
 	multipleRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*x\\b")
 	percentValueRE = regexp.MustCompile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*%")
+	dateTokenRE = regexp.MustCompile("(?i)\\b(?:[0-9]{1,2}\\s+[A-Za-z]{3,9},?\\s+[0-9]{4}|[A-Za-z]{3,9}\\s+[0-9]{1,2},?\\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{4})\\b")
 )
 
 type IPO struct {
@@ -382,8 +383,7 @@ func findIPORecordEvidence(ipoName, quotedRow, sourceText string) (string, error
 
 	if strings.TrimSpace(quotedRow) != "" {
 		quoted := normalizeEvidence(quotedRow)
-		for _, row := range strings.Split(sourceText, "
-") {
+		for _, row := range strings.Split(sourceText, "\n") {
 			if strings.Contains(normalizeEvidence(row), quoted) &&
 				strings.Contains(normalizeName(row), name) {
 				return strings.TrimSpace(row), nil
@@ -393,8 +393,7 @@ func findIPORecordEvidence(ipoName, quotedRow, sourceText string) (string, error
 	}
 
 	var matches []string
-	for _, row := range strings.Split(sourceText, "
-") {
+	for _, row := range strings.Split(sourceText, "\n") {
 		if strings.Contains(normalizeName(row), name) {
 			matches = append(matches, strings.TrimSpace(row))
 		}
