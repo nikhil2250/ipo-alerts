@@ -54,28 +54,21 @@ Add these repository Actions secrets:
 
 Optionally add repository Actions variables `SMTP_HOST` and `SMTP_PORT`; they default to `smtp.gmail.com` and `587`. Use **Actions > IPO closing alerts > Run workflow** to test a run manually.
 
-## Data notes
+## Data extraction
 
-Each run reads the GMP page and keeps its first three Mainboard rows in listed order, regardless of open or closed status. Retail subscription comes from IPOWatch's subscription table. sNII subscription is read from each IPO's detail page; unavailable values are reported as `Not available`. `MAIL_TO` accepts multiple comma-separated email addresses. IPOWatch describes GMP as unofficial and subject to change; the report is informational, not investment advice.
-Each run selects all Mainboard IPOs whose closing date is today in `TIMEZONE`, regardless of their Open or Closed status on the GMP page. Retail subscription comes from IPOWatch's subscription table. sNII subscription is read from each IPO's detail page; unavailable values are reported as `Not available`. `MAIL_TO` accepts multiple comma-separated email addresses. IPOWatch describes GMP as unofficial and subject to change; the report is informational, not investment advice.
+The application fetches the IPOWatch subscription and GMP pages, converts visible page markup into plain text, and sends that text to NVIDIA NIM for structured IPO extraction. It does not use HTML DOM parsing, table parsing, or fixed column positions.
 
-## Optional AI-assisted sNII fallback
+The subscription page is the source for IPO name, category, opening/closing dates, Retail, sNII, bNII, QIB and total subscription wherever those values are published. The GMP page enriches matching IPO records with GMP and GMP percentage. For closing-today Mainboard IPOs with missing sNII or bNII, the application fetches the IPO detail page and asks NVIDIA to extract the missing fields.
 
-The normal IPOWatch parser remains the primary extraction method. When it cannot find an explicit sNII multiple on an IPO detail page, the application can optionally ask an NVIDIA-hosted AI model to interpret the visible page text. AI never replaces an already parsed value.
+The model must return source evidence for each extracted field. Go checks that evidence is present in the fetched page text, validates dates and numeric values, matches records by normalized IPO name, and then applies the Mainboard + closing-today filter using the configured timezone. Missing values remain null; the report displays them as Not available. GMP is unofficial and may change; verify figures against exchange disclosures before making investment decisions.
 
-To enable the fallback, add these GitHub Actions settings:
+## NVIDIA AI configuration
 
-- Repository variable `AI_EXTRACTION_ENABLED=true`
-- Repository secret `NVIDIA_API_KEY`
-- Repository variable `NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b` (or another model available to your API key that supports NVIDIA NIM chat completions and JSON mode)
+Add these GitHub Actions settings:
 
-When AI extraction is disabled, the application behaves as before. If AI is enabled but the API request fails, the IPO report shows `Not available` for sNII rather than inventing a value.
+- Secret: NVIDIA_API_KEY
+- Variable: NVIDIA_MODEL (optional; defaults to nvidia/nemotron-3.5-lightning-30b-a3b)
 
-The fallback checks that the model returns the requested IPO name, a numeric non-negative multiple, and a verbatim evidence phrase present in the fetched page text that identifies sNII. These checks reduce extraction errors but do not guarantee that the source itself is correct. Review source data before making investment decisions.
+The NVIDIA endpoint is https://integrate.api.nvidia.com/v1/chat/completions. AI extraction is the primary extraction path and is required for the scheduled workflow; there is no deterministic table-parser fallback.
 
-AI is currently used only for sNII detail-page fallback. Retail, GMP, IPO discovery, Mainboard filtering, closing-date filtering, and email generation continue to use the existing deterministic Go logic. GMP remains unofficial.
-
-
-The AI client uses NVIDIA's OpenAI-compatible NIM endpoint:
-`https://integrate.api.nvidia.com/v1/chat/completions`.
-The endpoint and model are configurable in the source and workflow settings. Create an API key in the NVIDIA API Catalog / Build playground and store it only as a GitHub Actions secret.
+Use Actions > IPO closing alerts > Run workflow with dry_run enabled to fetch and extract data without sending an email. The workflow also runs go test ./... before the report job.
