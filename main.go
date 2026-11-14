@@ -27,7 +27,7 @@ const (
 	defaultTimezone = "Asia/Kolkata"
 )
 
-var openAIChatCompletionsURL = "https://api.openai.com/v1/chat/completions"
+var nvidiaChatCompletionsURL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 var gmpPercentPattern = regexp.MustCompile(`([+-]?[0-9]+[.]?[0-9]*)%`)
 var subscriptionMultiplePattern = regexp.MustCompile(`(?i)([0-9]+(?:\.[0-9]+)?)\s*x\b`)
@@ -311,10 +311,10 @@ type aiSubscriptionExtraction struct {
 // extractSmallNIIWithAI is a fallback for a changed/unrecognized detail-page layout.
 // It only accepts an explicitly evidenced numeric multiple from the supplied page.
 func extractSmallNIIWithAI(ctx context.Context, ipoName, sourceURL string, page []byte) (string, error) {
-	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+	apiKey := strings.TrimSpace(os.Getenv("NVIDIA_API_KEY"))
+	model := strings.TrimSpace(os.Getenv("NVIDIA_MODEL"))
 	if apiKey == "" || model == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY and OPENAI_MODEL must be configured")
+		return "", fmt.Errorf("NVIDIA_API_KEY and NVIDIA_MODEL must be configured")
 	}
 
 	const maxPageBytes = 50000
@@ -361,7 +361,7 @@ PAGE CONTENT:
 		return "", fmt.Errorf("encode AI request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIChatCompletionsURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, nvidiaChatCompletionsURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
