@@ -285,7 +285,7 @@ func buildExtractionPrompt(sourceType, requestedIPO, sourceURL, pageText string)
 	case "ipo_detail":
 		scope = "Extract subscription values for the requested IPO only. Return Retail, sNII, bNII, QIB and total subscription multiples where present."
 	}
-	return fmt.Sprintf("Extract Indian IPO information from this website page.\nSOURCE TYPE: %s\nSOURCE URL: %s\nREQUESTED IPO: %s\nTASK: %s\n\nRULES:\n1. Use only information visibly present in source text. Do not use model knowledge, estimates or other websites.\n2. Never guess missing values. Use JSON null for missing numbers and empty string for missing dates/category.\n3. Keep sNII and bNII separate. Never copy total NII into either field.\n4. Subscription values are numeric multiples, not percentages or application counts.\n5. GMP is absolute rupees; GMP percentage is separate.\n6. Normalize dates to YYYY-MM-DD. If ambiguous, use empty string.\n7. Category must be Mainboard or SME only when explicitly stated.\n8. Do not confuse issue price, lot size or listing date with subscription values.\n9. For every non-null number and every non-empty name/category/date, supply a verbatim evidence quote in evidence. Use the full table row or complete record containing the IPO name and that field label/value. The quote must occur contiguously in the source text; the same full row may support multiple fields.\n10. Do not combine fields from different IPOs. Ignore ads, navigation, related articles and stale historical examples.\n11. Return only JSON matching this shape: {\"ipos\":[{\"name\":\"Company IPO\",\"category\":\"Mainboard\",\"opening_date\":\"YYYY-MM-DD\",\"closing_date\":\"YYYY-MM-DD\",\"retail_subscription\":3.42,\"snii_subscription\":8.15,\"bnii_subscription\":11.2,\"qib_subscription\":5.6,\"total_subscription\":6.75,\"gmp\":25,\"gmp_percentage\":12.5,\"evidence\":{\"name\":\"source quote\",\"category\":\"source quote\",\"opening_date\":\"source quote\",\"closing_date\":\"source quote\",\"retail_subscription\":\"source quote\",\"snii_subscription\":\"source quote\",\"bnii_subscription\":\"source quote\",\"qib_subscription\":\"source quote\",\"total_subscription\":\"source quote\",\"gmp\":\"source quote\",\"gmp_percentage\":\"source quote\"}}]}. Omit evidence keys for null/empty fields. If none, return {\"ipos\":[]}.\n\nSOURCE TEXT:\n%s", sourceType, sourceURL, requestedIPO, scope, pageText)
+	return fmt.Sprintf("Extract Indian IPO information from this website page.\nSOURCE TYPE: %s\nSOURCE URL: %s\nREQUESTED IPO: %s\nTASK: %s\n\nRULES:\n1. Use only information visibly present in source text. Do not use model knowledge, estimates or other websites.\n2. Never guess missing values. Use JSON null for missing numbers and empty string for missing dates/category.\n3. Keep sNII and bNII separate. Never copy total NII into either field.\n4. Subscription values are numeric multiples, not percentages or application counts.\n5. GMP is absolute rupees; GMP percentage is separate.\n6. Normalize dates to YYYY-MM-DD. If ambiguous, use empty string.\n7. Category must be Mainboard or SME only when explicitly stated.\n8. Do not confuse issue price, lot size or listing date with subscription values.\n9. For every non-null number and every non-empty name/category/date, supply a verbatim evidence quote in evidence. A quote may be just the relevant cell text (for example Mainboard or 3.42x), but it must occur in the same visible table row or local record block as that IPO name. Do not reuse another IPO's row evidence.\n10. Do not combine fields from different IPOs. Ignore ads, navigation, related articles and stale historical examples.\n11. Return only JSON matching this shape: {\"ipos\":[{\"name\":\"Company IPO\",\"category\":\"Mainboard\",\"opening_date\":\"YYYY-MM-DD\",\"closing_date\":\"YYYY-MM-DD\",\"retail_subscription\":3.42,\"snii_subscription\":8.15,\"bnii_subscription\":11.2,\"qib_subscription\":5.6,\"total_subscription\":6.75,\"gmp\":25,\"gmp_percentage\":12.5,\"evidence\":{\"name\":\"source quote\",\"category\":\"source quote\",\"opening_date\":\"source quote\",\"closing_date\":\"source quote\",\"retail_subscription\":\"source quote\",\"snii_subscription\":\"source quote\",\"bnii_subscription\":\"source quote\",\"qib_subscription\":\"source quote\",\"total_subscription\":\"source quote\",\"gmp\":\"source quote\",\"gmp_percentage\":\"source quote\"}}]}. Omit evidence keys for null/empty fields. If none, return {\"ipos\":[]}.\n\nSOURCE TEXT:\n%s", sourceType, sourceURL, requestedIPO, scope, pageText)
 }
 
 func validateExtractedIPO(item ExtractedIPO, sourceText, sourceType string) error {
@@ -321,10 +321,37 @@ func validateEvidence(item ExtractedIPO, key, expectedText, sourceText string, c
 	quote := strings.TrimSpace(item.Evidence[key])
 	if quote == "" { return fmt.Errorf("missing evidence for %s", key) }
 	if !strings.Contains(normalizeEvidence(sourceText), normalizeEvidence(quote)) { return fmt.Errorf("evidence for %s is not present in source text", key) }
-	if !strings.Contains(normalizeName(quote), normalizeName(item.Name)) { return fmt.Errorf("evidence for %s does not identify IPO %q", key, item.Name) }
+	if !evidenceBelongsToIPO(item.Name, quote, sourceText) { return fmt.Errorf("evidence for %s is not associated with IPO %q in the same source row", key, item.Name) }
 	if expectedText != "" && !strings.Contains(normalizeName(quote), normalizeName(expectedText)) { return fmt.Errorf("evidence for %s does not support %q", key, expectedText) }
 	if checkNumber && expectedNumber != nil && (!evidenceHasNumber(quote, *expectedNumber) || !evidenceFieldHasValue(key, quote, *expectedNumber)) { return fmt.Errorf("evidence for %s does not show extracted value %v beside its field label", key, *expectedNumber) }
 	return nil
+}
+
+// evidenceBelongsToIPO accepts a short cell-level quote (for example "Mainboard")
+// only when that quote occurs in the same visible source row as the IPO name.
+func evidenceBelongsToIPO(ipoName, evidence, sourceText string) bool {
+	name := normalizeName(ipoName)
+	quote := normalizeEvidence(evidence)
+	if name == "" || quote == "" {
+		return false
+	}
+	rows := strings.Split(sourceText, "\n")
+	for _, row := range rows {
+		if strings.Contains(normalizeName(row), name) &&
+			strings.Contains(normalizeEvidence(row), quote) {
+			return true
+		}
+	}
+	// A few pages render one record across adjacent block lines. Allow a local
+	// two-line window, never an arbitrary match elsewhere on the page.
+	for i := 0; i+1 < len(rows); i++ {
+		window := rows[i] + " " + rows[i+1]
+		if strings.Contains(normalizeName(window), name) &&
+			strings.Contains(normalizeEvidence(window), quote) {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceHasNumber(evidence string, expected float64) bool {
