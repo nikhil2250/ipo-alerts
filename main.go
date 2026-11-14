@@ -23,7 +23,7 @@ import (
 
 const (
  gmpURL = "https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/"
- subscriptionURL = "https://ipowatch.in/ipo-subscription-status-today/"
+ subscriptionURL = "https://ipowatch.in/subscription/"
  defaultTimezone = "Asia/Kolkata"
  defaultNVIDIAModel = "nvidia/nemotron-3.5-lightning-30b-a3b"
 )
@@ -284,7 +284,7 @@ func buildExtractionPrompt(sourceType, requestedIPO, sourceURL, pageText string)
 	scope := "Extract all IPOs explicitly listed on this page."
 	switch sourceType {
 	case "subscription":
-		scope = "Extract every current IPO row on this subscription page: IPO name, category (Mainboard or SME), closing date, Retail, sNII, bNII, QIB and total subscription values. Extract sNII and bNII only when the source explicitly shows them as separate categories. Never copy combined NII into sNII or bNII."
+		scope = "Extract every current IPO row on this subscription page: IPO name, category (Mainboard or SME), closing date, QIB, Retail and Total subscription values. The page may show a combined NII column; do not copy that value into sNII or bNII. Return sNII and bNII only when they are explicitly separate columns/values on this page."
 	case "gmp":
 		scope = "Extract every IPO on this GMP page: IPO name, GMP in rupees and GMP percentage where present."
 	case "ipo_detail":
@@ -600,7 +600,7 @@ func ipoDetailsURL(name string) string {
 			separatorPending = false
 		} else if unicode.IsSpace(character) || character == '-' { separatorPending = true }
 	}
-	return "https://ipowatch.live/" + slug.String() + "-ipo-details/"
+	return "https://ipowatch.in/" + slug.String() + "-ipo-subscription-status/"
 }
 
 func sameDate(left, right time.Time) bool { return left.Year() == right.Year() && left.Month() == right.Month() && left.Day() == right.Day() }
